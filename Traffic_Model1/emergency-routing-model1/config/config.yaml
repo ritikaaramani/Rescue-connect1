@@ -1,0 +1,49 @@
+model:
+  lstm_input_size: 12
+  lstm_hidden_size: 128
+  lstm_num_layers: 2
+  lstm_dropout: 0.2
+  gcn_input_dim: 64
+  gcn_hidden_dim: 128
+  num_prediction_horizons: 4
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 7
+  horizon_weights: [1.0, 0.9, 0.7, 0.5]
+  device: "cuda"
+  checkpoint_dir: "models/checkpoints"
+
+data:
+  window_size: 12
+  prediction_horizons: [5, 10, 20, 30]
+  val_ratio: 0.1
+  test_ratio: 0.1
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  cities:
+    - name: "Delhi"
+      bbox: {north: 28.88, south: 28.40, east: 77.35, west: 76.84}
+    - name: "Mumbai"
+      bbox: {north: 19.27, south: 18.89, east: 72.99, west: 72.77}
+    - name: "Bengaluru"
+      bbox: {north: 13.14, south: 12.83, east: 77.78, west: 77.46}
+    - name: "Chennai"
+      bbox: {north: 13.23, south: 12.91, east: 80.31, west: 80.17}
+    - name: "Patna"
+      bbox: {north: 25.65, south: 25.55, east: 85.22, west: 85.08}
+
+apis:
+  mappls_base_url: "https://apis.mappls.com"
+  here_base_url: "https://traffic.ls.hereapi.com"
+  ola_maps_base_url: "https://api.olamaps.io"
+  openweather_base_url: "https://api.openweathermap.org/data/2.5"
+  imd_base_url: "https://imdpune.gov.in"
+
+inference:
+  host: "0.0.0.0"
+  port: 8001
+  max_latency_ms: 500

@@ -1,0 +1,22 @@
+# Backend Dependencies (Python)
+fastapi
+uvicorn
+pydantic
+numpy
+pandas
+xgboost
+scikit-learn
+stable-baselines3[extra]
+gymnasium
+traci
+sumolib
+python-dotenv
+requests
+aiohttp
+shap
+matplotlib
+seaborn
+
+# Mobile Dependencies (Flutter)
+# Consult pubspec.yaml in Traffic_Model1/emergency_routing_flutter
+# Keys: flutter_riverpod, dio, flutter_map, latlong2, fl_chart
