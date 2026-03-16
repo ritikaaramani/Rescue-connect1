@@ -12,6 +12,7 @@ from pydantic import BaseModel
 import numpy as np
 import copy
 from sqlalchemy.orm import Session
+import httpx
 
 # Add parent directory to path  
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,6 +27,7 @@ from location_inference import location_inference_service
 from dqn_rerouting_service import dqn_rerouting_service
 from blockage_simulator import blockage_simulator, BlockageType
 from test_integration import router as test_router
+from supabase_bridge import supabase_bridge
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +62,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -137,6 +139,15 @@ class IncidentReport(BaseModel):
     ambulance_eta_min: Optional[int] = None
     patient_condition: Optional[str] = "Stable"
     assigned_hospital_id: Optional[str] = None
+
+class MLPipelineRequest(BaseModel):
+    start: str = "hospital"
+    destination: str = "accident_location"
+    city: str = "Bengaluru"
+    vehicle_id: str = "ambulance_01"
+    current_speed: float = 25.0
+    remaining_distance: float = 5200.0
+    weather_coeff: float = 1.0
 
 class UnifiedRoutingResponse(BaseModel):
     status: str
@@ -310,8 +321,24 @@ async def predict_batch(cities: List[str]):
 async def get_comprehensive_routing(request: UnifiedRoutingRequest):
     t0 = time.perf_counter()
     
-    # 1. Get Forecast (Model 1)
-    forecast = get_traffic_forecast(request.city_name)
+    # 1. Get Forecast (Model 1) — try real Model 1 first, fall back to mock
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            m1_resp = await client.post(
+                "http://127.0.0.1:8001/predict",
+                json={"city": request.city_name},
+            )
+            m1_resp.raise_for_status()
+            m1_data = m1_resp.json()
+            forecast = {
+                "t5": m1_data.get("congestion_t5", 0.45),
+                "t10": m1_data.get("congestion_t10", 0.50),
+                "t30": m1_data.get("congestion_t30", 0.60),
+            }
+            logger.info("Model 1 real prediction used for %s", request.city_name)
+    except Exception as m1_exc:
+        logger.warning("Model 1 unavailable (%s), using mock forecast", m1_exc)
+        forecast = get_traffic_forecast(request.city_name)
     
     # 2. Calculate Reliability (Model 2)
     reliability = calculate_reliability_score({
@@ -348,6 +375,36 @@ async def get_comprehensive_routing(request: UnifiedRoutingRequest):
         prediction_timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         latency_ms=elapsed_ms
     )
+
+
+@app.post("/route/ml-pipeline")
+async def ml_pipeline_route(request: MLPipelineRequest):
+    """Call the hacky-backend ML pipeline (M1->M2->M3) for best route selection."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "http://127.0.0.1:8002/best-route",
+                json={
+                    "start": request.start,
+                    "destination": request.destination,
+                    "city": request.city,
+                },
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("ML pipeline service unavailable (%s), returning mock fallback", exc)
+        return {
+            "status": "mock_fallback",
+            "model1": {"city": request.city, "congestion_t5": 0.45, "congestion_t10": 0.48, "congestion_t20": 0.53},
+            "model2_routes": [
+                {"route_id": "highway_route", "reliability": 0.87, "eta_minutes": 12.5, "route_distance_km": 8.2},
+                {"route_id": "arterial_route", "reliability": 0.72, "eta_minutes": 15.1, "route_distance_km": 9.7},
+                {"route_id": "bypass_route", "reliability": 0.91, "eta_minutes": 14.3, "route_distance_km": 10.1},
+            ],
+            "model3_decision": {"vehicle_id": request.vehicle_id, "action": "stay", "reason": "mock_fallback"},
+            "best_route": {"route_id": "bypass_route", "reliability": 0.91, "eta_minutes": 14.3}
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -611,9 +668,9 @@ async def create_blockage(
     )
     
     # Broadcast blockage to all dispatch clients
-    await manager.broadcast_to_dispatch(
-        message_type="BLOCKAGE_ALERT",
-        payload={
+    await manager.broadcast_to_dispatch({
+        "type": "BLOCKAGE_ALERT",
+        "blockage": {
             "id": blockage.id,
             "type": blockage.type.value,
             "lat": blockage.lat,
@@ -622,7 +679,7 @@ async def create_blockage(
             "description": blockage.description,
             "estimated_clear_time_min": blockage.estimated_clear_time_min,
         }
-    )
+    })
     
     return blockage.to_dict()
 
@@ -684,7 +741,7 @@ async def startup_event():
                 ]
                 db.add_all(hospitals)
                 db.commit()
-                logger.info("✅ Seeded initial hospitals")
+                logger.info("Seeded initial hospitals")
             
             # Seed Vehicles
             if db.query(VehicleDB).count() == 0:
@@ -700,7 +757,7 @@ async def startup_event():
                 ]
                 db.add_all(vehicles)
                 db.commit()
-                logger.info(f"✅ Seeded {len(vehicles)} initial vehicles")
+                logger.info(f"Seeded {len(vehicles)} initial vehicles")
                 
         except Exception as e:
             logger.error(f"Seeding failed: {e}")
@@ -708,51 +765,77 @@ async def startup_event():
         finally:
             db.close()
             
-    logger.info("🚀 API is ready")
+    # Start Supabase bridge (polls for citizen disaster posts)
+    await supabase_bridge.start()
+    logger.info("Supabase bridge started")
+
+    logger.info("API is ready")
 
 # ---------------------------------------------------------------------------
 # Core Endpoints
 # ---------------------------------------------------------------------------
 
+MOCK_VEHICLES = [
+    {"id": "UP-14-342", "name": "Ambulance Alpha",   "type": "ambulance", "status": "AVAILABLE", "lat": 22.7533, "lon": 75.8937, "speed": 0, "eta": None},
+    {"id": "MP-09-991", "name": "Ambulance Beta",    "type": "ambulance", "status": "AVAILABLE", "lat": 22.7400, "lon": 75.8950, "speed": 0, "eta": None},
+    {"id": "DL-1C-552", "name": "Ambulance Gamma",   "type": "ambulance", "status": "AVAILABLE", "lat": 22.7300, "lon": 75.8850, "speed": 0, "eta": None},
+    {"id": "UP-14-343", "name": "Swift Rescue 1",    "type": "ambulance", "status": "AVAILABLE", "lat": 22.7450, "lon": 75.8980, "speed": 0, "eta": None},
+    {"id": "MP-09-880", "name": "Heartbeat Squad",   "type": "ambulance", "status": "AVAILABLE", "lat": 22.7350, "lon": 75.8900, "speed": 0, "eta": None},
+    {"id": "UP-14-500", "name": "Fire Engine 1",     "type": "fire",      "status": "AVAILABLE", "lat": 22.7500, "lon": 75.9000, "speed": 0, "eta": None},
+    {"id": "MP-09-770", "name": "Critical Care 4",   "type": "ambulance", "status": "AVAILABLE", "lat": 22.7480, "lon": 75.8920, "speed": 0, "eta": None},
+    {"id": "DL-1C-999", "name": "Rapid Response",    "type": "ambulance", "status": "AVAILABLE", "lat": 22.7550, "lon": 75.8960, "speed": 0, "eta": None},
+]
+
 @app.get("/vehicles")
 async def get_all_vehicles(db: Session = Depends(get_db)):
     """Fetch all vehicles in the system."""
-    if not db:
-        return {"vehicles": []}
-    vehicles = db.query(VehicleDB).all()
-    return {
-        "vehicles": [
-            {
-                "id": v.id,
-                "name": v.name,
-                "type": v.type,
-                "status": v.status,
-                "lat": v.current_lat,
-                "lon": v.current_lon,
-                "speed": v.current_speed,
-                "eta": v.eta_min
-            } for v in vehicles
-        ]
-    }
+    try:
+        if not db:
+            return {"vehicles": MOCK_VEHICLES}
+        vehicles = db.query(VehicleDB).all()
+        if not vehicles:
+            return {"vehicles": MOCK_VEHICLES}
+        return {
+            "vehicles": [
+                {
+                    "id": v.id, "name": v.name, "type": v.type,
+                    "status": v.status, "lat": v.current_lat,
+                    "lon": v.current_lon, "speed": v.current_speed, "eta": v.eta_min
+                } for v in vehicles
+            ]
+        }
+    except Exception as e:
+        logger.warning("vehicles DB error (%s), using mock", e)
+        return {"vehicles": MOCK_VEHICLES}
+
+MOCK_HOSPITALS_LIST = [
+    {"id": "H-1", "name": "Indore Apollo Hospital",    "lat": 22.7533, "lon": 75.8937, "icu_beds": 5,  "trauma": True},
+    {"id": "H-2", "name": "CHL Hospital",              "lat": 22.7441, "lon": 75.8901, "icu_beds": 2,  "trauma": True},
+    {"id": "H-3", "name": "Medanta Super Specialty",   "lat": 22.7600, "lon": 75.9000, "icu_beds": 12, "trauma": True},
+    {"id": "H-4", "name": "Bombay Hospital Indore",    "lat": 22.7500, "lon": 75.9100, "icu_beds": 0,  "trauma": False},
+]
 
 @app.get("/hospitals/all")
 async def get_all_hospitals(db: Session = Depends(get_db)):
     """Fetch all hospitals."""
-    if not db:
-        return {"hospitals": []}
-    hospitals = db.query(HospitalDB).all()
-    return {
-        "hospitals": [
-            {
-                "id": h.id,
-                "name": h.name,
-                "lat": h.location_lat,
-                "lon": h.location_lon,
-                "icu_beds": h.icu_beds_available,
-                "trauma": h.trauma_specialty
-            } for h in hospitals
-        ]
-    }
+    try:
+        if not db:
+            return {"hospitals": MOCK_HOSPITALS_LIST}
+        hospitals = db.query(HospitalDB).all()
+        if not hospitals:
+            return {"hospitals": MOCK_HOSPITALS_LIST}
+        return {
+            "hospitals": [
+                {
+                    "id": h.id, "name": h.name, "lat": h.location_lat,
+                    "lon": h.location_lon, "icu_beds": h.icu_beds_available,
+                    "trauma": h.trauma_specialty
+                } for h in hospitals
+            ]
+        }
+    except Exception as e:
+        logger.warning("hospitals DB error (%s), using mock", e)
+        return {"hospitals": MOCK_HOSPITALS_LIST}
 
 @app.get("/incident/{incident_id}/logs")
 async def get_incident_logs(incident_id: str, db: Session = Depends(get_db)):
@@ -763,12 +846,71 @@ async def get_incident_logs(incident_id: str, db: Session = Depends(get_db)):
     return {"logs": service.get_dispatch_log(incident_id)}
 
 
+@app.post("/supabase/post/{post_id}/dispatch")
+async def mark_post_dispatched(post_id: str, status: str = "dispatched"):
+    """Mark a Supabase citizen post as dispatched (called after emergency dispatch)."""
+    success = await supabase_bridge.update_post_dispatch_status(post_id, status)
+    return {"success": success, "post_id": post_id, "status": status}
+
+
+@app.get("/citizen/posts")
+async def get_citizen_posts(severity_min: int = 1, limit: int = 20):
+    """Fetch recent citizen disaster posts from Supabase (or mock data if not configured)."""
+    import os, httpx as _httpx
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        # Return mock data so Flutter can render something without real Supabase creds
+        return {"posts": [
+            {
+                "id": "mock-001",
+                "caption": "Road accident on Ring Road near Apollo Hospital",
+                "severity": 8,
+                "location": {"lat": 22.7533, "lon": 75.8937},
+                "dispatch_status": "pending",
+                "created_at": "2026-03-17T10:00:00Z",
+                "ai_analysis": {"disaster_type": "accident"}
+            },
+            {
+                "id": "mock-002",
+                "caption": "Heavy flooding near Rajwada area",
+                "severity": 7,
+                "location": {"lat": 22.7200, "lon": 75.8600},
+                "dispatch_status": "pending",
+                "created_at": "2026-03-17T09:45:00Z",
+                "ai_analysis": {"disaster_type": "flood"}
+            }
+        ]}
+    try:
+        async with _httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{url}/rest/v1/posts",
+                headers={
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
+                },
+                params={
+                    "order": "created_at.desc",
+                    "limit": str(limit),
+                }
+            )
+            resp.raise_for_status()
+            posts = resp.json()
+            if severity_min > 1:
+                posts = [p for p in posts if int(p.get("severity") or 0) >= severity_min]
+            return {"posts": posts}
+    except Exception as e:
+        logger.error(f"Failed to fetch citizen posts: {e}")
+        return {"posts": [], "error": str(e)}
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop simulation daemon on app shutdown."""
     logger.info("Shutting down...")
     simulation_daemon.stop()
     await blockage_simulator.stop()
+    await supabase_bridge.stop()
     logger.info("Application stopped")
 
 

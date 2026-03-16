@@ -182,6 +182,13 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
   }
 
   @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final allRequests = ref.watch(emergencyRequestsProvider);
     final pending = allRequests.where((r) => r.state == IncidentState.reported).toList();
@@ -914,16 +921,16 @@ class _PriorityChip extends StatelessWidget {
   }
 }
 
-class _ActiveDispatchCard extends StatefulWidget {
+class _ActiveDispatchCard extends ConsumerStatefulWidget {
   final ActiveDispatch dispatch;
   final VoidCallback onEnd;
   const _ActiveDispatchCard({required this.dispatch, required this.onEnd});
 
   @override
-  State<_ActiveDispatchCard> createState() => _ActiveDispatchCardState();
+  ConsumerState<_ActiveDispatchCard> createState() => _ActiveDispatchCardState();
 }
 
-class _ActiveDispatchCardState extends State<_ActiveDispatchCard>
+class _ActiveDispatchCardState extends ConsumerState<_ActiveDispatchCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulse;
 
@@ -1080,6 +1087,13 @@ class _ActiveDispatchCardState extends State<_ActiveDispatchCard>
         ),
       ),
     );
+  }
+
+  String _formatTime(DateTime? dt) {
+    if (dt == null) return '--:--';
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 
   void _showMissionLogs(BuildContext context, String incidentId) {

@@ -9,8 +9,14 @@ Uses Google Cloud Vision API for:
 
 import logging
 from typing import Dict, Any, Optional, List, Tuple
-from google.cloud import vision
-from google.cloud.vision_v1 import types
+try:
+    from google.cloud import vision
+    from google.cloud.vision_v1 import types
+    _VISION_AVAILABLE = True
+except ImportError:
+    vision = None
+    types = None
+    _VISION_AVAILABLE = False
 import os
 
 logger = logging.getLogger(__name__)
@@ -27,16 +33,17 @@ class LocationInferenceService:
             credentials_path: Path to Google Cloud credentials JSON file.
                             If None, uses GOOGLE_APPLICATION_CREDENTIALS env var.
         """
+        self.client = None
+        if not _VISION_AVAILABLE:
+            logger.warning("Google Vision not installed - location inference will use fallback methods")
+            return
         try:
             if credentials_path:
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-            
             self.client = vision.ImageAnnotatorClient()
-            logger.info("✅ Google Vision API initialized")
+            logger.info("Google Vision API initialized")
         except Exception as e:
-            logger.warning(f"⚠️ Google Vision API initialization failed: {e}")
-            logger.warning("⚠️ Location inference will use fallback methods")
-            self.client = None
+            logger.warning("Google Vision API initialization failed: %s - using fallback methods", e)
 
     async def infer_location_from_photo(
         self,

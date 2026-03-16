@@ -59,7 +59,7 @@ class TrafficBlockage:
             "description": self.description,
             "created_at": self.created_at.isoformat(),
             "estimated_clear_time_min": self.estimated_clear_time_min,
-            "affected_segments": affected_segments,
+            "affected_segments": self.affected_segments,
         }
 
 
@@ -139,10 +139,10 @@ class BlockageSimulator:
                             )
                             # Broadcast to all clients
                             if manager:
-                                await manager.broadcast_to_dispatch(
-                                    message_type="BLOCKAGE_ALERT",
-                                    payload=blockage.to_dict()
-                                )
+                                await manager.broadcast_to_dispatch({
+                                    "type": "BLOCKAGE_ALERT",
+                                    "blockage": blockage.to_dict()
+                                })
                 
                 # Remove expired blockages
                 now = datetime.now()

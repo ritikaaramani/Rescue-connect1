@@ -34,11 +34,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabase client
-supabase: Client = create_client(
-    os.getenv("SUPABASE_URL", ""),
-    os.getenv("SUPABASE_SERVICE_KEY", "")
-)
+# Supabase client (graceful fallback when credentials are not set)
+_sb_url = os.getenv("SUPABASE_URL", "")
+_sb_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+try:
+    supabase: Client = create_client(_sb_url, _sb_key) if _sb_url and _sb_key else None
+except Exception as _e:
+    supabase = None
+    import sys; print(f"Supabase init skipped: {_e}", file=sys.stderr)
 
 
 class AnalyzeRequest(BaseModel):

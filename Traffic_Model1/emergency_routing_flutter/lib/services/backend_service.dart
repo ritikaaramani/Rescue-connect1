@@ -12,7 +12,7 @@ class BackendService {
     'http://192.168.1.1:8000',  // Common router IP
   ];
   
-  late String baseUrl;
+  String baseUrl = 'http://localhost:8000';
   
   // Polling timers
   Timer? _vehiclePoller;
@@ -338,6 +338,87 @@ class BackendService {
     }
   }
   
+  /// Run the full ML pipeline (M1 → M2 → M3) for a routing request
+  Future<Map<String, dynamic>> runMLPipeline({
+    required String vehicleId,
+    String start = 'hospital',
+    String destination = 'accident_location',
+    String city = 'Indore',
+    double currentSpeed = 25.0,
+    double remainingDistance = 5200.0,
+    double weatherCoeff = 1.0,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/route/ml-pipeline'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'start': start,
+          'destination': destination,
+          'city': city,
+          'vehicle_id': vehicleId,
+          'current_speed': currentSpeed,
+          'remaining_distance': remainingDistance,
+          'weather_coeff': weatherCoeff,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        throw Exception('ML pipeline failed: ${response.body}');
+      }
+    } catch (e) {
+      print('ML pipeline error: $e');
+      // Return mock fallback so the UI never crashes
+      return {
+        'status': 'client_fallback',
+        'best_route': {
+          'route_id': 'bypass_route',
+          'reliability': 0.88,
+          'eta_minutes': 13.0,
+        },
+        'model3_decision': {'action': 'stay'},
+      };
+    }
+  }
+
+  /// Fetch citizen disaster posts (high severity, pending dispatch)
+  Future<List<Map<String, dynamic>>> getCitizenPosts({
+    int severityMin = 6,
+    int limit = 20,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/citizen/posts').replace(
+        queryParameters: {
+          'severity_min': severityMin.toString(),
+          'limit': limit.toString(),
+        },
+      );
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(data['posts'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      print('Error fetching citizen posts: $e');
+      return [];
+    }
+  }
+
+  /// Mark a citizen post as dispatched
+  Future<bool> markPostDispatched(String postId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/supabase/post/$postId/dispatch'),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Error marking post dispatched: $e');
+      return false;
+    }
+  }
+
   /// Clean up resources
   void dispose() {
     stopPolling();
@@ -360,4 +441,14 @@ final backendServiceProvider = Provider<BackendService>((ref) {
     service.dispose();
   });
   return service;
+});
+
+/// Provider that exposes a function to run the ML pipeline
+final mlPipelineProvider = Provider<Future<Map<String, dynamic>> Function({
+  required String vehicleId,
+  String city,
+})>((ref) {
+  final service = ref.watch(backendServiceProvider);
+  return ({required String vehicleId, String city = 'Indore'}) =>
+      service.runMLPipeline(vehicleId: vehicleId, city: city);
 });

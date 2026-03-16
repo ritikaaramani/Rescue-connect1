@@ -21,16 +21,16 @@ class ImageAnalyzer:
         self.openai_key = os.getenv("OPENAI_API_KEY", "")
         
         if self.provider == "gemini" and self.gemini_key and self.gemini_key != "your-gemini-api-key-here":
-            print("✅ Using Google Gemini for image analysis")
+            print("[OK] Using Google Gemini for image analysis")
             self.active_provider = "gemini"
         elif self.openai_key:
-            print("✅ Using OpenAI GPT-4 Vision for image analysis")
+            print("[OK] Using OpenAI GPT-4 Vision for image analysis")
             self.active_provider = "openai"
         elif self.gemini_key and self.gemini_key != "your-gemini-api-key-here":
-            print("✅ Using Google Gemini for image analysis")
+            print("[OK] Using Google Gemini for image analysis")
             self.active_provider = "gemini"
         else:
-            print("⚠️ No API key configured - using basic analysis only")
+            print("[WARN] No API key configured - using basic analysis only")
             self.active_provider = None
 
     async def analyze_image(self, image_url: str) -> dict:
@@ -46,7 +46,7 @@ class ImageAnalyzer:
                 return await self._basic_analysis(image_url)
                 
         except Exception as e:
-            print(f"❌ Error analyzing image: {e}")
+            print(f"[ERROR] Error analyzing image: {e}")
             return self._default_response(str(e))
 
     def _get_prompt(self) -> str:
@@ -109,7 +109,7 @@ JSON Format:
         
         for model_name in models_to_try:
             try:
-                print(f"🔍 Trying model: {model_name}")
+                print(f"[INFO] Trying model: {model_name}")
                 
                 # Download image
                 async with httpx.AsyncClient() as http_client:
@@ -129,17 +129,17 @@ JSON Format:
                 )
                 content = response.text
                 
-                print(f"📝 Gemini response: {content[:200]}...")
+                print(f"[INFO] Gemini response: {content[:200]}...")
                 
                 return self._parse_json_response(content)
                     
             except Exception as e:
-                print(f"⚠️ Model {model_name} failed: {e}")
+                print(f"[WARN] Model {model_name} failed: {e}")
                 last_error = e
                 continue
         
         # All models failed
-        print(f"❌ All Gemini models failed")
+        print("[ERROR] All Gemini models failed")
         return self._default_response(f"Gemini error: {str(last_error)}")
 
     async def _analyze_with_openai(self, image_url: str) -> dict:
@@ -149,7 +149,7 @@ JSON Format:
         client = OpenAI(api_key=self.openai_key)
         
         try:
-            print(f"🔍 Analyzing with OpenAI: {image_url[:80]}...")
+            print(f"[INFO] Analyzing with OpenAI: {image_url[:80]}...")
             
             response = client.chat.completions.create(
                 model="gpt-4o",
@@ -166,12 +166,12 @@ JSON Format:
             )
             
             content = response.choices[0].message.content
-            print(f"📝 OpenAI response: {content[:200]}...")
+            print(f"[INFO] OpenAI response: {content[:200]}...")
             
             return self._parse_json_response(content)
                 
         except Exception as e:
-            print(f"❌ OpenAI error: {type(e).__name__}: {e}")
+            print(f"[ERROR] OpenAI error: {type(e).__name__}: {e}")
             return self._default_response(f"OpenAI error: {str(e)}")
 
     def _parse_json_response(self, content: str) -> dict:
@@ -209,7 +209,7 @@ JSON Format:
                 return self._default_response("No JSON found in response")
                 
         except json.JSONDecodeError as e:
-            print(f"❌ JSON parse error: {e}")
+            print(f"[ERROR] JSON parse error: {e}")
             return self._default_response(f"JSON parse error: {str(e)}")
 
     async def _basic_analysis(self, image_url: str) -> dict:
