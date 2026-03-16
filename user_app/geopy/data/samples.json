@@ -1,0 +1,40 @@
+[
+  {
+    "post_id": "1",
+    "caption": "Flood near Silk Board junction",
+    "ocr_text": "Silk Board",
+    "gps": null,
+    "image_path": null
+  },
+  {
+    "post_id": "2",
+    "caption": "Heavy waterlogging reported",
+    "ocr_text": "KR Puram Underpass",
+    "gps": null,
+    "image_path": null
+  },
+  {
+    "post_id": "3",
+    "caption": "Rescue operations underway near the bridge",
+    "ocr_text": "",
+    "gps": {
+      "lat": 12.9716,
+      "lon": 77.5946
+    },
+    "image_path": null
+  },
+  {
+    "post_id": "4",
+    "caption": "Water everywhere, roads blocked",
+    "ocr_text": "",
+    "gps": null,
+    "image_path": null
+  },
+  {
+    "post_id": "5",
+    "caption": "People stranded near Marathahalli bridge",
+    "ocr_text": "Marathahalli",
+    "gps": null,
+    "image_path": null
+  }
+]

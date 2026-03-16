@@ -1,0 +1,252 @@
+// coverage:ignore-file
+// GENERATED CODE - DO NOT MODIFY BY HAND
+// ignore_for_file: type=lint
+// ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
+
+part of 'health_response.dart';
+
+// **************************************************************************
+// FreezedGenerator
+// **************************************************************************
+
+T _$identity<T>(T value) => value;
+
+final _privateConstructorUsedError = UnsupportedError(
+    'It seems like you constructed your class using `MyClass._()`. This constructor is only meant to be used by freezed and you are not supposed to need it nor use it.\nPlease check the documentation here for more information: https://github.com/rrousselGit/freezed#adding-getters-and-methods-to-our-models');
+
+HealthResponse _$HealthResponseFromJson(Map<String, dynamic> json) {
+  return _HealthResponse.fromJson(json);
+}
+
+/// @nodoc
+mixin _$HealthResponse {
+  String get status => throw _privateConstructorUsedError;
+  @JsonKey(name: 'model_loaded')
+  bool get modelLoaded => throw _privateConstructorUsedError;
+  @JsonKey(name: 'cities_available')
+  List<String> get citiesAvailable => throw _privateConstructorUsedError;
+  @JsonKey(name: 'uptime_seconds')
+  double get uptimeSeconds => throw _privateConstructorUsedError;
+
+  /// Serializes this HealthResponse to a JSON map.
+  Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
+
+  /// Create a copy of HealthResponse
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  $HealthResponseCopyWith<HealthResponse> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class $HealthResponseCopyWith<$Res> {
+  factory $HealthResponseCopyWith(
+          HealthResponse value, $Res Function(HealthResponse) then) =
+      _$HealthResponseCopyWithImpl<$Res, HealthResponse>;
+  @useResult
+  $Res call(
+      {String status,
+      @JsonKey(name: 'model_loaded') bool modelLoaded,
+      @JsonKey(name: 'cities_available') List<String> citiesAvailable,
+      @JsonKey(name: 'uptime_seconds') double uptimeSeconds});
+}
+
+/// @nodoc
+class _$HealthResponseCopyWithImpl<$Res, $Val extends HealthResponse>
+    implements $HealthResponseCopyWith<$Res> {
+  _$HealthResponseCopyWithImpl(this._value, this._then);
+
+  // ignore: unused_field
+  final $Val _value;
+  // ignore: unused_field
+  final $Res Function($Val) _then;
+
+  /// Create a copy of HealthResponse
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? status = null,
+    Object? modelLoaded = null,
+    Object? citiesAvailable = null,
+    Object? uptimeSeconds = null,
+  }) {
+    return _then(_value.copyWith(
+      status: null == status
+          ? _value.status
+          : status // ignore: cast_nullable_to_non_nullable
+              as String,
+      modelLoaded: null == modelLoaded
+          ? _value.modelLoaded
+          : modelLoaded // ignore: cast_nullable_to_non_nullable
+              as bool,
+      citiesAvailable: null == citiesAvailable
+          ? _value.citiesAvailable
+          : citiesAvailable // ignore: cast_nullable_to_non_nullable
+              as List<String>,
+      uptimeSeconds: null == uptimeSeconds
+          ? _value.uptimeSeconds
+          : uptimeSeconds // ignore: cast_nullable_to_non_nullable
+              as double,
+    ) as $Val);
+  }
+}
+
+/// @nodoc
+abstract class _$$HealthResponseImplCopyWith<$Res>
+    implements $HealthResponseCopyWith<$Res> {
+  factory _$$HealthResponseImplCopyWith(_$HealthResponseImpl value,
+          $Res Function(_$HealthResponseImpl) then) =
+      __$$HealthResponseImplCopyWithImpl<$Res>;
+  @override
+  @useResult
+  $Res call(
+      {String status,
+      @JsonKey(name: 'model_loaded') bool modelLoaded,
+      @JsonKey(name: 'cities_available') List<String> citiesAvailable,
+      @JsonKey(name: 'uptime_seconds') double uptimeSeconds});
+}
+
+/// @nodoc
+class __$$HealthResponseImplCopyWithImpl<$Res>
+    extends _$HealthResponseCopyWithImpl<$Res, _$HealthResponseImpl>
+    implements _$$HealthResponseImplCopyWith<$Res> {
+  __$$HealthResponseImplCopyWithImpl(
+      _$HealthResponseImpl _value, $Res Function(_$HealthResponseImpl) _then)
+      : super(_value, _then);
+
+  /// Create a copy of HealthResponse
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? status = null,
+    Object? modelLoaded = null,
+    Object? citiesAvailable = null,
+    Object? uptimeSeconds = null,
+  }) {
+    return _then(_$HealthResponseImpl(
+      status: null == status
+          ? _value.status
+          : status // ignore: cast_nullable_to_non_nullable
+              as String,
+      modelLoaded: null == modelLoaded
+          ? _value.modelLoaded
+          : modelLoaded // ignore: cast_nullable_to_non_nullable
+              as bool,
+      citiesAvailable: null == citiesAvailable
+          ? _value._citiesAvailable
+          : citiesAvailable // ignore: cast_nullable_to_non_nullable
+              as List<String>,
+      uptimeSeconds: null == uptimeSeconds
+          ? _value.uptimeSeconds
+          : uptimeSeconds // ignore: cast_nullable_to_non_nullable
+              as double,
+    ));
+  }
+}
+
+/// @nodoc
+@JsonSerializable()
+class _$HealthResponseImpl implements _HealthResponse {
+  _$HealthResponseImpl(
+      {required this.status,
+      @JsonKey(name: 'model_loaded') required this.modelLoaded,
+      @JsonKey(name: 'cities_available')
+      required final List<String> citiesAvailable,
+      @JsonKey(name: 'uptime_seconds') required this.uptimeSeconds})
+      : _citiesAvailable = citiesAvailable;
+
+  factory _$HealthResponseImpl.fromJson(Map<String, dynamic> json) =>
+      _$$HealthResponseImplFromJson(json);
+
+  @override
+  final String status;
+  @override
+  @JsonKey(name: 'model_loaded')
+  final bool modelLoaded;
+  final List<String> _citiesAvailable;
+  @override
+  @JsonKey(name: 'cities_available')
+  List<String> get citiesAvailable {
+    if (_citiesAvailable is EqualUnmodifiableListView) return _citiesAvailable;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_citiesAvailable);
+  }
+
+  @override
+  @JsonKey(name: 'uptime_seconds')
+  final double uptimeSeconds;
+
+  @override
+  String toString() {
+    return 'HealthResponse(status: $status, modelLoaded: $modelLoaded, citiesAvailable: $citiesAvailable, uptimeSeconds: $uptimeSeconds)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$HealthResponseImpl &&
+            (identical(other.status, status) || other.status == status) &&
+            (identical(other.modelLoaded, modelLoaded) ||
+                other.modelLoaded == modelLoaded) &&
+            const DeepCollectionEquality()
+                .equals(other._citiesAvailable, _citiesAvailable) &&
+            (identical(other.uptimeSeconds, uptimeSeconds) ||
+                other.uptimeSeconds == uptimeSeconds));
+  }
+
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  int get hashCode => Object.hash(runtimeType, status, modelLoaded,
+      const DeepCollectionEquality().hash(_citiesAvailable), uptimeSeconds);
+
+  /// Create a copy of HealthResponse
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$HealthResponseImplCopyWith<_$HealthResponseImpl> get copyWith =>
+      __$$HealthResponseImplCopyWithImpl<_$HealthResponseImpl>(
+          this, _$identity);
+
+  @override
+  Map<String, dynamic> toJson() {
+    return _$$HealthResponseImplToJson(
+      this,
+    );
+  }
+}
+
+abstract class _HealthResponse implements HealthResponse {
+  factory _HealthResponse(
+      {required final String status,
+      @JsonKey(name: 'model_loaded') required final bool modelLoaded,
+      @JsonKey(name: 'cities_available')
+      required final List<String> citiesAvailable,
+      @JsonKey(name: 'uptime_seconds')
+      required final double uptimeSeconds}) = _$HealthResponseImpl;
+
+  factory _HealthResponse.fromJson(Map<String, dynamic> json) =
+      _$HealthResponseImpl.fromJson;
+
+  @override
+  String get status;
+  @override
+  @JsonKey(name: 'model_loaded')
+  bool get modelLoaded;
+  @override
+  @JsonKey(name: 'cities_available')
+  List<String> get citiesAvailable;
+  @override
+  @JsonKey(name: 'uptime_seconds')
+  double get uptimeSeconds;
+
+  /// Create a copy of HealthResponse
+  /// with the given fields replaced by the non-null parameter values.
+  @override
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$HealthResponseImplCopyWith<_$HealthResponseImpl> get copyWith =>
+      throw _privateConstructorUsedError;
+}

@@ -1,0 +1,5 @@
+spacy>=3.5.0
+geopy>=2.3.0
+pillow>=9.0.0
+torch>=2.0.0
+torchvision>=0.15.0

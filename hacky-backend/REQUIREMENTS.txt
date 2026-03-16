@@ -1,0 +1,9 @@
+# Runtime dependencies for the integration pipeline
+numpy
+pandas
+scikit-learn
+xgboost
+requests
+PyYAML
+fastapi
+uvicorn

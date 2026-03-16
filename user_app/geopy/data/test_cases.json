@@ -1,0 +1,38 @@
+[
+    {
+        "post_id": "test_1",
+        "caption": "Flood near underpass",
+        "ocr_text": "KR Puram Underpass",
+        "gps": null,
+        "expected_location_contains": "KR Puram",
+        "expected_confidence_min": 0.5
+    },
+    {
+        "post_id": "test_2",
+        "caption": "Water everywhere",
+        "ocr_text": "",
+        "gps": null,
+        "expected_location_contains": null,
+        "expected_confidence_min": 0.0,
+        "expected_ambiguous": true
+    },
+    {
+        "post_id": "test_3",
+        "caption": "Trapped near school",
+        "ocr_text": "Government School Indiranagar",
+        "gps": null,
+        "expected_location_contains": "Indiranagar",
+        "expected_confidence_min": 0.5
+    },
+    {
+        "post_id": "test_4",
+        "caption": "Flooding in the area",
+        "ocr_text": "Koramangala",
+        "gps": {
+            "lat": 12.9352,
+            "lon": 77.6245
+        },
+        "expected_location_contains": "Koramangala",
+        "expected_confidence_min": 0.8
+    }
+]

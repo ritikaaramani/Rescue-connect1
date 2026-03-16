@@ -1,0 +1,7 @@
+path: D:/2nd_Year_BE/EL 3rd sem/ocr_module/data/text_detection_dataset
+train: images/train
+val: images/val
+
+nc: 1
+names:
+  - text_region
