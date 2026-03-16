@@ -325,7 +325,7 @@ async def get_comprehensive_routing(request: UnifiedRoutingRequest):
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             m1_resp = await client.post(
-                "http://127.0.0.1:8001/predict",
+                "http://127.0.0.1:9001/predict",
                 json={"city": request.city_name},
             )
             m1_resp.raise_for_status()
@@ -383,7 +383,7 @@ async def ml_pipeline_route(request: MLPipelineRequest):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
-                "http://127.0.0.1:8002/best-route",
+                "http://127.0.0.1:9002/best-route",
                 json={
                     "start": request.start,
                     "destination": request.destination,
@@ -916,4 +916,4 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=9000)

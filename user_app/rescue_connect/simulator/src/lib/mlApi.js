@@ -2,7 +2,7 @@
  * ML Backend API client for Simulator
  */
 
-const ML_BACKEND_URL = import.meta.env.VITE_ML_BACKEND_URL || 'http://localhost:8000'
+const ML_BACKEND_URL = import.meta.env.VITE_ML_BACKEND_URL || 'http://localhost:9003'
 
 export const mlApi = {
   /**

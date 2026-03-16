@@ -2,29 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/theme.dart';
-import 'screens/role_selection_screen.dart';
+import 'screens/landing_screen.dart'; // import the new landing screen
 
-// Replace with your actual Supabase project URL and anon key
 const String _supabaseUrl = String.fromEnvironment(
   'SUPABASE_URL',
-  defaultValue: 'https://your-project.supabase.co',
+  defaultValue: 'https://uhlnwyrikuiprkuubloh.supabase.co',
 );
 const String _supabaseAnonKey = String.fromEnvironment(
   'SUPABASE_ANON_KEY',
-  defaultValue: 'your-anon-key',
+  defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVobG53eXJpa3VpcHJrdXVibG9oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2ODI0MzEsImV4cCI6MjA4NDI1ODQzMX0.bNm32saAekzSO8WsWYPW3U_xxWvz5jy-ifW4CVajlrc',
 );
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Supabase (non-blocking — app works without valid creds)
+  // Initialize Supabase
   try {
     await Supabase.initialize(
       url: _supabaseUrl,
       anonKey: _supabaseAnonKey,
     );
   } catch (e) {
-    // Continue without Supabase if creds are placeholder
     debugPrint('Supabase init skipped: $e');
   }
 
@@ -39,7 +37,7 @@ class EmergencyRoutingApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Emergency Routing',
       theme: buildAppTheme(),
-      home: const RoleSelectionScreen(),
+      home: const LandingScreen(), // Use LandingScreen
       debugShowCheckedModeBanner: false,
     );
   }

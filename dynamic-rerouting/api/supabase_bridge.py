@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-ROUTING_API_URL = "http://127.0.0.1:8000"
+ROUTING_API_URL = "http://127.0.0.1:9000"
 
 # Severity threshold above which a post auto-creates an incident
 AUTO_INCIDENT_SEVERITY = 6

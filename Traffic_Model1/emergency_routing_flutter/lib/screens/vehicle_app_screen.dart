@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/theme.dart';
 import '../models/route_model.dart';
 import '../services/backend_service.dart';
@@ -29,8 +30,12 @@ class _VehicleAppScreenState extends ConsumerState<VehicleAppScreen> {
   String _missionOrigin = 'Waiting for mission...';
   String _missionDest = '';
   
+  // Mission destination coordinates
+  LatLng _missionDestCoord = const LatLng(22.7533, 75.8937);
+  
   late StreamSubscription _vehicleUpdatesSub;
   late StreamSubscription _rerouteAlertsSub;
+  RealtimeChannel? _supabaseChannel;
 
   @override
   void initState() {
@@ -49,11 +54,6 @@ class _VehicleAppScreenState extends ConsumerState<VehicleAppScreen> {
           _currentLon = (data['lon'] ?? _currentLon).toDouble();
           _currentSpeed = (data['speed_kmh'] ?? _currentSpeed).toDouble();
           _etaMin = (data['eta_minutes'] ?? _etaMin).toDouble();
-          
-          // Auto-accept mission on first update
-          if (!_hasMission && data['eta_minutes'] != null) {
-            _acceptMission();
-          }
         });
       });
       
@@ -71,22 +71,67 @@ class _VehicleAppScreenState extends ConsumerState<VehicleAppScreen> {
           ),
         );
       });
+
+      _setupSupabaseListener();
     });
+  }
+
+  void _setupSupabaseListener() {
+    try {
+      _supabaseChannel = Supabase.instance.client
+          .channel('public:posts')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'posts',
+            callback: (payload) {
+              final newRecord = payload.newRecord;
+              if (newRecord['dispatch_status'] == 'assigned' || newRecord['dispatch_status'] == 'in-progress') {
+                if (newRecord['inferred_latitude'] != null && newRecord['inferred_longitude'] != null) {
+                  _acceptMission(
+                    lat: newRecord['inferred_latitude'].toDouble(),
+                    lng: newRecord['inferred_longitude'].toDouble(),
+                    destinationName: newRecord['location'] ?? 'Disaster Area',
+                    type: newRecord['disaster_type'] ?? 'Emergency',
+                  );
+                }
+              }
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Supabase listening error: $e');
+    }
   }
 
   @override
   void dispose() {
     _vehicleUpdatesSub.cancel();
     _rerouteAlertsSub.cancel();
+    _supabaseChannel?.unsubscribe();
     super.dispose();
   }
   
-  void _acceptMission() {
+  void _acceptMission({
+    required double lat,
+    required double lng,
+    required String destinationName,
+    required String type,
+  }) {
+    if (!mounted) return;
     setState(() {
       _hasMission = true;
       _status = VehicleState.EN_ROUTE;
-      _missionOrigin = 'Bhawarkuan Square';
-      _missionDest = 'Apollo Hospital';
+      _missionOrigin = 'Current Location';
+      _missionDest = '$type at $destinationName';
+      _missionDestCoord = LatLng(lat, lng);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🚨 NEW MISSION: $_missionDest', style: const TextStyle(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.redAccent,
+        )
+      );
     });
   }
 
@@ -153,7 +198,7 @@ class _VehicleAppScreenState extends ConsumerState<VehicleAppScreen> {
                   origin: _missionOrigin,
                   destination: _missionDest,
                   originCoord: LatLng(_currentLat, _currentLon),
-                  destCoord: const LatLng(22.7533, 75.8937), // Hospital
+                  destCoord: _missionDestCoord, // Use dynamic mission destination
                   isDriver: true,
                 ),
               ));

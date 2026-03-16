@@ -7,12 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 class BackendService {
   // Try multiple URLs to find working backend
   static const List<String> possibleUrls = [
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://192.168.1.1:8000',  // Common router IP
+    'http://localhost:9000',
+    'http://127.0.0.1:9000',
+    'http://192.168.1.1:9000',  // Common router IP
   ];
   
-  String baseUrl = 'http://localhost:8000';
+  String baseUrl = 'http://localhost:9000';
   
   // Polling timers
   Timer? _vehiclePoller;

@@ -37,3 +37,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/hero-rescue.png
+    - assets/base-camp.png
+    - assets/control-room.png
+    - assets/field-tablet.png
+    - assets/planning-room.png
