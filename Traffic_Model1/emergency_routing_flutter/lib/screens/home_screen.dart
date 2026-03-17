@@ -603,8 +603,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       options: MapOptions(
         initialCenter: LatLng(_city.lat, _city.lng),
         initialZoom: 13.0,
-        interactionOptions:
-            const InteractionOptions(flags: InteractiveFlag.all),
+        interactionOptions: const InteractionOptions(
+          // Keep map gestures, but allow page/panel wheel scrolling on web.
+          flags: InteractiveFlag.all & ~InteractiveFlag.scrollWheelZoom,
+        ),
       ),
       children: [
         // Dark map tiles
@@ -796,47 +798,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // ── Bottom panel ───────────────────────────────────────────────────────────
 
   Widget _buildBottomPanel(RouteResult? result) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0C0C0C),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border.all(color: kCardBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.9),
-            blurRadius: 30,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom + 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Drag handle
-              Center(
-                child: Container(
-                  margin: const EdgeInsets.only(top: 12, bottom: 8),
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[800],
-                    borderRadius: BorderRadius.circular(2),
+    final panelMaxHeight = MediaQuery.of(context).size.height * 0.78;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: panelMaxHeight),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF0C0C0C),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          border: Border.all(color: kCardBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.9),
+              blurRadius: 30,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 12, bottom: 8),
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[800],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
 
-              if (_phase == _Phase.idle) ..._buildIdleContent(),
-              if (_phase == _Phase.searching ||
-                  _phase == _Phase.routing) ..._buildSearchContent(),
-              if (_phase == _Phase.results && result != null)
-                ..._buildResultsContent(result),
-            ],
+                if (_phase == _Phase.idle) ..._buildIdleContent(),
+                if (_phase == _Phase.searching ||
+                    _phase == _Phase.routing) ..._buildSearchContent(),
+                if (_phase == _Phase.results && result != null)
+                  ..._buildResultsContent(result),
+              ],
+            ),
           ),
         ),
       ),

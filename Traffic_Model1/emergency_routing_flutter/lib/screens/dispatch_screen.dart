@@ -247,7 +247,7 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
         focusPostId.isNotEmpty &&
         _autoOpenedDialogForPostId != focusPostId) {
       EmergencyRequest? match;
-      for (final req in pending) {
+      for (final req in allRequests) {
         if (req.id == focusPostId) {
           match = req;
           break;
@@ -258,7 +258,7 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
         final reqToOpen = match;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          _showDispatchDialog(reqToOpen);
+          _showIncidentSceneDialog(reqToOpen);
           setState(() {
             _autoOpenedDialogForPostId = focusPostId;
           });
@@ -558,6 +558,99 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
                 style: GoogleFonts.rajdhani(
                     color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
           ),
+        ],
+      ),
+    );
+  }
+
+  void _showIncidentSceneDialog(EmergencyRequest req) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Text(
+          'Digital Emergency Scene (ID: ${req.id})',
+          style: GoogleFonts.rajdhani(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: SizedBox(
+          width: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.dashboard_customize, color: Colors.blueAccent, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Shared Situation Room',
+                            style: GoogleFonts.rajdhani(
+                              color: Colors.blueAccent,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text('Emergency Incident #${req.id.split('-').last}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      Text('Location: ${req.originLabel}', style: const TextStyle(color: Colors.white70)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(req.videoFeedUrl != null ? Icons.videocam : Icons.videocam_off, color: req.videoFeedUrl != null ? Colors.redAccent : Colors.grey, size: 16),
+                          const SizedBox(width: 4),
+                          Text(req.videoFeedUrl != null ? 'Database Feed: LIVE' : 'Feed: OFFLINE', style: TextStyle(color: req.videoFeedUrl != null ? Colors.redAccent : Colors.grey)),
+                        ],
+                      ),
+                      if (req.videoFeedUrl != null) ...[
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 250),
+                            child: Image.network(
+                              req.videoFeedUrl!,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (ctx, err, stack) => const Text('Image unavailable at URL', style: TextStyle(color: Colors.white54)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(selectedIncidentForRoutingProvider.notifier).state = req;
+              ref.read(mainAppTabProvider.notifier).state = 1;
+            },
+            icon: const Icon(Icons.send),
+            label: const Text('ASSIGN VEHICLE'),
+            style: ElevatedButton.styleFrom(backgroundColor: req.type.color, foregroundColor: Colors.white),
+          )
         ],
       ),
     );
