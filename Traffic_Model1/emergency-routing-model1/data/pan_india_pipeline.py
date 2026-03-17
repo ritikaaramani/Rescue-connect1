@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, List, Optional, Union
 
 from data.fetch_traffic import fetch_all_sources, save_to_parquet
 from data.fetch_weather import fetch_city_weather, merge_weather_with_traffic
@@ -18,7 +19,7 @@ from data.preprocess import run_preprocessing_pipeline
 logger = logging.getLogger(__name__)
 
 
-def _slugify_bbox(bbox: dict) -> str:
+def _slugify_bbox(bbox: Dict) -> str:
     return (
         f"n{bbox['north']:.2f}_s{bbox['south']:.2f}_e{bbox['east']:.2f}_w{bbox['west']:.2f}"
         .replace("-", "m")
@@ -33,9 +34,9 @@ def generate_india_grid_bboxes(
     max_lon: float = 96.0,
     step_lat: float = 1.0,
     step_lon: float = 1.0,
-) -> list[dict]:
+) -> List[Dict]:
     """Generate rectangular bbox tiles covering India bounds."""
-    bboxes: list[dict] = []
+    bboxes: List[Dict] = []
 
     lat = min_lat
     while lat < max_lat:
@@ -57,16 +58,16 @@ def generate_india_grid_bboxes(
     return bboxes
 
 
-def _default_weather_context_city(config: dict) -> str:
+def _default_weather_context_city(config: Dict) -> str:
     first = config["data"]["cities"][0]
     return first if isinstance(first, str) else first["name"]
 
 
 def collect_area_snapshot(
-    bbox: dict,
+    bbox: Dict,
     area_id: str,
-    config: dict,
-    weather_context_city: str | None = None,
+    config: Dict,
+    weather_context_city: Optional[str] = None,
 ) -> int:
     """Collect one merged traffic+weather snapshot for a grid area.
 
@@ -94,12 +95,12 @@ def collect_area_snapshot(
 
 
 def run_pan_india_collection_and_preprocessing(
-    config: dict,
+    config: Dict,
     step_lat: float = 1.0,
     step_lon: float = 1.0,
-    max_areas: int | None = None,
+    max_areas: Optional[int] = None,
     min_rows_required: int = 20,
-) -> dict:
+) -> Dict:
     """Collect and preprocess data over a pan-India grid.
 
     Areas with fewer than `min_rows_required` rows are skipped for preprocessing.
@@ -108,8 +109,8 @@ def run_pan_india_collection_and_preprocessing(
     if max_areas is not None:
         bboxes = bboxes[:max_areas]
 
-    processed_areas: list[str] = []
-    skipped_areas: list[str] = []
+    processed_areas: List[str] = []
+    skipped_areas: List[str] = []
 
     for bbox in bboxes:
         area_id = f"area_{_slugify_bbox(bbox)}"

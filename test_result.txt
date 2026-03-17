@@ -1,0 +1,20 @@
+HTTP Status: 200
+{
+  "is_disaster": false,
+  "disaster_type": "unknown",
+  "severity": "unknown",
+  "description": "Analysis failed: Gemini error: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-1.5-flash is not found for API version v1, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}",
+  "detected_elements": [],
+  "location_hints": [],
+  "people_affected": "unknown",
+  "urgency_score": 0
+}
+
+is_disaster: False (type: bool)
+disaster_type: unknown (type: str)
+severity: unknown (type: str)
+description: Analysis failed: Gemini error: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-1.5-flash is not found for API version v1, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}} (type: str)
+detected_elements: [] (type: list)
+location_hints: [] (type: list)
+people_affected: unknown (type: str)
+urgency_score: 0 (type: int)

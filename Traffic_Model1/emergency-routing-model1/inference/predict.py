@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from scipy.sparse import csr_matrix
 from dotenv import load_dotenv
 from sklearn.preprocessing import MinMaxScaler
-from typing import cast
+from typing import cast, Dict, List, Optional, Tuple, Union
 
 from models.lstm_gcn import EmergencyTrafficModel, build_model
 from data.build_graph import build_city_graph, build_area_graph
@@ -37,7 +37,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _SPATIAL_COLS = ["avg_speed_limit", "avg_road_weight", "is_signal", "street_count"]
 
 # Features that may be absent from live data — fill with safe defaults
-_LIVE_DEFAULTS: dict = {
+_LIVE_DEFAULTS: Dict = {
     "festival_intensity": 0.0,
     "incident_severity":  0.0,
     "incident_flag":      0.0,
@@ -55,25 +55,25 @@ _DEFAULT_HORIZON_KEYS = [
 ]
 
 
-def _bbox_center(bbox: dict) -> tuple[float, float]:
+def _bbox_center(bbox: Dict) -> Tuple[float, float]:
     """Return (lat, lon) center for a bbox dict."""
     lat = (float(bbox["north"]) + float(bbox["south"])) / 2.0
     lon = (float(bbox["east"]) + float(bbox["west"])) / 2.0
     return lat, lon
 
 
-def _dist_sq(a: tuple[float, float], b: tuple[float, float]) -> float:
+def _dist_sq(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     """Squared Euclidean distance in lat/lon space."""
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
 
-def summarise_prediction_result(result: dict) -> dict:
+def summarise_prediction_result(result: Dict) -> Dict:
     """Convert model output arrays into a flat float summary dict.
 
     Keeps standard t5/t10/t20/t30 keys for backward compatibility,
     filling with NaN when the model has fewer horizons.
     """
-    summary: dict = {k: float("nan") for k in _DEFAULT_HORIZON_KEYS}
+    summary: Dict = {k: float("nan") for k in _DEFAULT_HORIZON_KEYS}
 
     for key, value in result.items():
         if key.startswith("congestion_") or key.startswith("uncertainty_"):
@@ -83,9 +83,9 @@ def summarise_prediction_result(result: dict) -> dict:
 
 
 def _resolve_reference_city(
-    config: dict,
-    requested_city: str | None,
-    bbox: dict | None = None,
+    config: Dict,
+    requested_city: Optional[str],
+    bbox: Optional[Dict] = None,
 ) -> str:
     """Pick a valid reference city that has a fitted scaler on disk."""
     processed_dir = Path(config["data"]["processed_data_dir"])
@@ -97,7 +97,7 @@ def _resolve_reference_city(
         if req_scaler.exists():
             return requested_city
 
-    candidates: list[tuple[str, Path, dict | None]] = []
+    candidates: List[Tuple[str, Path, Optional[Dict]]] = []
     for city_entry in config["data"]["cities"]:
         city_name = city_entry if isinstance(city_entry, str) else city_entry.get("name", "")
         scaler_path = processed_dir / city_name / "scaler.pkl"
@@ -107,7 +107,7 @@ def _resolve_reference_city(
 
     if bbox and candidates:
         target_center = _bbox_center(bbox)
-        with_bbox: list[tuple[str, Path, dict]] = [
+        with_bbox: List[Tuple[str, Path, Dict]] = [
             (name, scaler_path, city_bbox)
             for name, scaler_path, city_bbox in candidates
             if city_bbox is not None
@@ -128,7 +128,7 @@ def _resolve_reference_city(
     )
 
 
-def _config_for_checkpoint(config: dict, ckpt: dict) -> dict:
+def _config_for_checkpoint(config: Dict, ckpt: Dict) -> Dict:
     """Return a config copy with model horizons aligned to checkpoint tensors."""
     cfg = dict(config)
     cfg["model"] = dict(config["model"])
@@ -160,9 +160,9 @@ def _config_for_checkpoint(config: dict, ckpt: dict) -> dict:
 
 def load_model_and_graph(
     city_name: str,
-    config: dict,
+    config: Dict,
     device: torch.device,
-) -> tuple[EmergencyTrafficModel, nn.Linear, csr_matrix, pd.DataFrame, MinMaxScaler]:
+) -> Tuple[EmergencyTrafficModel, nn.Linear, csr_matrix, pd.DataFrame, MinMaxScaler]:
     """Load all inference artifacts for a city.
 
     Loads the model checkpoint, spatial projection layer, road graph,
@@ -257,8 +257,8 @@ def load_model_and_graph(
 
 def fetch_live_features(
     city_name: str,
-    bbox: dict,
-    config: dict,
+    bbox: Dict,
+    config: Dict,
 ) -> pd.DataFrame:
     """Fetch real-time traffic + weather and merge them.
 
@@ -336,7 +336,7 @@ def fetch_live_features(
 def build_inference_window(
     live_df: pd.DataFrame,
     scaler: MinMaxScaler,
-    config: dict,
+    config: Dict,
 ) -> np.ndarray:
     """Build a single (1, window_size, 12) inference tensor from live data.
 
@@ -401,9 +401,9 @@ def build_inference_window(
 
 def run_prediction(
     city_name: str,
-    config: dict,
+    config: Dict,
     device: torch.device,
-) -> dict:
+) -> Dict:
     """Full end-to-end live inference for one city.
 
     Latency is measured over steps 2–7 only (not model/graph loading).
@@ -480,13 +480,13 @@ def run_prediction(
 
 
 def run_prediction_for_bbox(
-    bbox: dict,
-    config: dict,
+    bbox: Dict,
+    config: Dict,
     device: torch.device,
-    area_id: str | None = None,
-    weather_context_city: str | None = None,
-    reference_city: str | None = None,
-) -> dict:
+    area_id: Optional[str] = None,
+    weather_context_city: Optional[str] = None,
+    reference_city: Optional[str] = None,
+) -> Dict:
     """Run live inference for an arbitrary India area defined by bbox."""
     ref_city = _resolve_reference_city(config, reference_city, bbox=bbox)
 
@@ -531,10 +531,10 @@ def run_prediction_for_bbox(
 # ---------------------------------------------------------------------------
 
 def run_batch_prediction(
-    city_names: list[str],
-    config: dict,
+    city_names: List[str],
+    config: Dict,
     device: torch.device,
-) -> list[dict]:
+) -> List[Dict]:
     """Run predictions for multiple cities sequentially.
 
     Per-city failures are caught and appended as error dicts so the

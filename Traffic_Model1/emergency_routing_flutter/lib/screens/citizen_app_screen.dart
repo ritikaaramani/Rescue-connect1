@@ -1,21 +1,74 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../services/backend_service.dart';
 import '../config/theme.dart';
 
-class CitizenAppScreen extends StatefulWidget {
+class CitizenAppScreen extends ConsumerStatefulWidget {
   const CitizenAppScreen({super.key});
 
   @override
-  State<CitizenAppScreen> createState() => _CitizenAppScreenState();
+  ConsumerState<CitizenAppScreen> createState() => _CitizenAppScreenState();
 }
 
-class _CitizenAppScreenState extends State<CitizenAppScreen> {
+class _CitizenAppScreenState extends ConsumerState<CitizenAppScreen> {
   String _selectedType = 'Accident';
   bool _isSmartWitnessMode = false;
   bool _locationInferred = false;
   bool _isReported = false;
+  bool _isInferring = false;
+  bool _isReporting = false;
+  String _inferredAddress = '';
+  List<double> _currentLocation = [22.7533, 75.8937]; // Default Indore
 
   final List<String> _types = ['Accident', 'Fire', 'Medical', 'Hazard', 'Protest'];
+
+  Future<void> _inferLocation() async {
+    setState(() => _isInferring = true);
+    final backend = ref.read(backendServiceProvider);
+    
+    // In a real app, we'd pick an image. Here we simulate with the API.
+    final result = await backend.inferLocationFromPhoto(
+      fallbackLat: _currentLocation[0],
+      fallbackLon: _currentLocation[1],
+    );
+
+    if (mounted) {
+      setState(() {
+        _isInferring = false;
+        if (result['inferred_location'] != null) {
+          _locationInferred = true;
+          _inferredAddress = result['address'] ?? 'Detected Location';
+          _currentLocation = List<double>.from(result['inferred_location']);
+        }
+      });
+    }
+  }
+
+  Future<void> _reportEmergency() async {
+    setState(() => _isReporting = true);
+    final backend = ref.read(backendServiceProvider);
+    
+    final result = await backend.reportIncident(
+      incidentId: 'incident_${DateTime.now().millisecondsSinceEpoch}',
+      reporterId: 'citizen_user_1',
+      location: _currentLocation,
+      type: _selectedType.toLowerCase(),
+      severity: 8, // High by default
+      description: 'Emergency reported by citizen witness',
+    );
+
+    if (mounted) {
+      setState(() {
+        _isReporting = false;
+        _isReported = true;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Reported: ${result['message'] ?? 'Success'}')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,17 +156,19 @@ class _CitizenAppScreenState extends State<CitizenAppScreen> {
                         ),
                         const SizedBox(height: 12),
                         if (!_locationInferred)
-                          ElevatedButton.icon(
-                            onPressed: () => setState(() => _locationInferred = true),
-                            icon: const Icon(Icons.camera_alt),
-                            label: const Text('Snap Landmarks to Infer Location'),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent.withOpacity(0.2), foregroundColor: Colors.blueAccent, elevation: 0),
-                          )
+                          _isInferring 
+                            ? const CircularProgressIndicator(color: Colors.blueAccent)
+                            : ElevatedButton.icon(
+                                onPressed: _inferLocation,
+                                icon: const Icon(Icons.camera_alt),
+                                label: const Text('Snap Landmarks to Infer Location'),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent.withOpacity(0.2), foregroundColor: Colors.blueAccent, elevation: 0),
+                              )
                         else ...[
                           const Icon(Icons.check_circle, color: Colors.greenAccent, size: 32),
                           const SizedBox(height: 8),
                           const Text('Possible location detected:', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          const Text('MG Road Metro Exit 2', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          Text(_inferredAddress, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -186,16 +241,18 @@ class _CitizenAppScreenState extends State<CitizenAppScreen> {
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: () => setState(() => _isReported = true),
+                      onPressed: _isReporting ? null : _reportEmergency,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _isSmartWitnessMode ? kAiCyan : kDanger,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: Text(
-                        _isSmartWitnessMode ? 'SUBMIT WITNESS REPORT' : 'REPORT EMERGENCY',
-                        style: GoogleFonts.rajdhani(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
-                      ),
+                      child: _isReporting 
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text(
+                            _isSmartWitnessMode ? 'SUBMIT WITNESS REPORT' : 'REPORT EMERGENCY',
+                            style: GoogleFonts.rajdhani(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
+                          ),
                     ),
                   )
               ],

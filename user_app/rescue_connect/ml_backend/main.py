@@ -3,16 +3,18 @@ FastAPI backend for ML-powered disaster image analysis.
 """
 
 import os
+import tempfile
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Union
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
 from app.image_analyzer import analyzer
 from app.disaster_classifier import analyze_text, extract_entities
-from app.ocr_pipeline import extract_text_from_url
+from app.ocr_pipeline import extract_text_from_url, extract_text_from_path
 from app.geo.geo_pipeline import resolve_location_async
 from app.geo.extractor import extract_locations
 from app.image_dedup import check_for_duplicate, compute_and_store_hash
@@ -55,7 +57,7 @@ class AnalyzeResponse(BaseModel):
     severity: str
     description: str
     detected_elements: list
-    location_hints: str
+    location_hints: Union[List[str], str]
     people_affected: str
     urgency_score: int
 
@@ -247,38 +249,59 @@ async def process_full_pipeline(request: ProcessPostRequest):
         # Step 1: Analyze image with existing Gemini analyzer
         image_analysis = await analyzer.analyze_image(post["image_url"])
         
-        # Step 2: Run OCR on image
-        ocr_result = await extract_text_from_url(post["image_url"])
-        pipeline_ocr_text = ocr_result.get("extracted_text", "")
+        # Optimized processing: Download image once for OCR and Scene Analysis
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
         
-        # Merge with AI visible text (fallback/enhancement)
-        ai_visible_text = image_analysis.get("visible_text", "")
-        ocr_text = f"{pipeline_ocr_text} {ai_visible_text}".strip()
-        
-        # Step 3: Run text analysis on caption + OCR text
-        caption = post.get("caption", "")
-        text_analysis = analyze_text(caption, ocr_text)
-        
-        # Step 4: Run geolocation pipeline
-        extracted_locations = text_analysis.get("entities", {}).get("locations", [])
-        
-        # Check for User Verified GPS (Ground Truth)
-        # If lat/lon exists and AI hasn't processed it yet, it's likely from the device/user
-        user_gps = None
-        if post.get("latitude") is not None and post.get("longitude") is not None:
-            # Only treat as Ground Truth if not previously AI generated 
-            # (or if we trust the input explicitly)
-            if not post.get("ai_processed", False):
-                user_gps = {"lat": post["latitude"], "lon": post["longitude"]}
-        
-        geo_result = await resolve_location_async(
-            caption=caption,
-            ocr_text=ocr_text,
-            image_url=post["image_url"],
-            extracted_locations=extracted_locations,
-            location_hints=image_analysis.get("location_hints", []),
-            gps=user_gps
-        )
+        try:
+            # Download image
+            async with httpx.AsyncClient() as client:
+                res = await client.get(post["image_url"], timeout=30.0)
+                res.raise_for_status()
+                with open(tmp_path, "wb") as f:
+                    f.write(res.content)
+            
+            # Step 2: Run OCR on image from local path
+            ocr_result = extract_text_from_path(tmp_path)
+            pipeline_ocr_text = ocr_result.get("extracted_text", "")
+            
+            # Merge with AI visible text (fallback/enhancement)
+            ai_visible_text = image_analysis.get("visible_text", "")
+            ocr_text = f"{pipeline_ocr_text} {ai_visible_text}".strip()
+            
+            # Step 3: Run text analysis on caption + OCR text
+            caption = post.get("caption", "")
+            text_analysis = analyze_text(caption, ocr_text)
+            
+            # Step 4: Run geolocation pipeline with image path
+            extracted_locations = text_analysis.get("entities", {}).get("locations", [])
+            
+            # Check for User Verified GPS (Ground Truth)
+            user_gps = None
+            if post.get("latitude") is not None and post.get("longitude") is not None:
+                if not post.get("ai_processed", False):
+                    user_gps = {"lat": post["latitude"], "lon": post["longitude"]}
+            
+            # Convert location_hints from string to list if needed
+            location_hints_raw = image_analysis.get("location_hints", "")
+            location_hints_list = (
+                [location_hints_raw] if isinstance(location_hints_raw, str) and location_hints_raw
+                else location_hints_raw if isinstance(location_hints_raw, list) else []
+            )
+            
+            geo_result = await resolve_location_async(
+                caption=caption,
+                ocr_text=ocr_text,
+                image_url=post["image_url"],
+                extracted_locations=extracted_locations,
+                location_hints=location_hints_list,
+                gps=user_gps,
+                image_path=tmp_path # Pass the local path for scene analysis
+            )
+        finally:
+            # Always clean up the temp file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
         
         # Determine status based on analysis
         new_status = "pending"
@@ -324,21 +347,53 @@ async def process_full_pipeline(request: ProcessPostRequest):
         # Update the post
         supabase.table("posts").update(update_data).eq("id", request.post_id).execute()
         
+        # Convert all numpy/non-JSON types to native Python types
+        def convert_to_json_safe(obj):
+            """Recursively convert numpy and non-JSON types to JSON-safe types"""
+            import numpy as np
+            if obj is None:
+                return None
+            if isinstance(obj, bool):
+                return bool(obj)
+            # np.bool was removed in recent NumPy versions; handle only np.bool_
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            if isinstance(obj, (int, np.integer)):
+                return int(obj)
+            if isinstance(obj, (float, np.floating)):
+                return float(obj)
+            if isinstance(obj, str):
+                return str(obj)
+            if isinstance(obj, (list, tuple)):
+                return [convert_to_json_safe(x) for x in obj]
+            if isinstance(obj, dict):
+                return {k: convert_to_json_safe(v) for k, v in obj.items()}
+            return str(obj)
+        
         return {
             "success": True,
             "post_id": request.post_id,
             "new_status": new_status,
-            "image_analysis": image_analysis,
-            "ocr_result": {
-                "extracted_text": ocr_text,
-                "num_regions": ocr_result.get("num_regions", 0)
-            },
-            "text_analysis": text_analysis,
-            "geo_result": geo_result
+            "image_analysis": convert_to_json_safe({
+                "is_disaster": image_analysis.get("is_disaster"),
+                "disaster_type": image_analysis.get("disaster_type"),
+                "urgency_score": image_analysis.get("urgency_score")
+            }),
+            "ocr_extracted_text": ocr_text[:200] if ocr_text else None,
+            "geo_result": convert_to_json_safe({
+                "latitude": geo_result.get("latitude"),
+                "longitude": geo_result.get("longitude"),
+                "method": geo_result.get("method")
+            })
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        import sys
+        error_msg = f"{type(e).__name__}: {str(e)[:200]}"
+        tb_str = traceback.format_exc()
+        print(f"[ERROR] /process-full failed:\n{tb_str}", file=sys.stderr)
+        return {"success": False, "error": error_msg}
 
 
 class DispatchUpdateRequest(BaseModel):
@@ -675,4 +730,4 @@ This is an automated notification from RescueConnect.
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=9003)

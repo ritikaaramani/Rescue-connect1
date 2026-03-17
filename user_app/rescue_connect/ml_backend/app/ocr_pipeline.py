@@ -24,15 +24,40 @@ except ImportError:
     print("[OCR] Warning: ultralytics not installed. Install with: pip install ultralytics")
 
 # Configure Tesseract path from environment or use default
-TESSERACT_PATH = os.getenv(
-    "TESSERACT_PATH", 
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
+# Configure Tesseract path from environment or use default locations
+def find_tesseract():
+    # 1. Environment variable
+    env_path = os.getenv("TESSERACT_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    
+    # 2. Common Windows installation paths
+    common_paths = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Users\{}\AppData\Local\Programs\Tesseract-OCR\tesseract.exe".format(os.getlogin()),
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+            
+    # 3. System PATH check
+    import shutil
+    shutil_path = shutil.which("tesseract")
+    if shutil_path:
+        return shutil_path
+        
+    return None
 
-if os.path.exists(TESSERACT_PATH):
+TESSERACT_PATH = find_tesseract()
+
+if TESSERACT_PATH:
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+    print(f"[OCR] Using Tesseract at: {TESSERACT_PATH}")
 else:
-    print(f"[OCR] Warning: Tesseract not found at {TESSERACT_PATH}")
+    print("[OCR] Warning: Tesseract not found. Geolocation OCR features will be limited.")
+    print("[OCR] Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki")
 
 
 class OCRPipeline:

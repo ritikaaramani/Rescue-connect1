@@ -63,7 +63,7 @@ class CitizenPost {
 class SupabaseService {
   final String _backendUrl;
 
-  SupabaseService({String backendUrl = 'http://127.0.0.1:8000'})
+  SupabaseService({String backendUrl = 'http://127.0.0.1:9000'})
       : _backendUrl = backendUrl;
 
   /// Fetch recent citizen posts (proxied through routing backend)

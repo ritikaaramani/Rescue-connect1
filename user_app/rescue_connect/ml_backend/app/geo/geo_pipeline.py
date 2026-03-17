@@ -97,6 +97,12 @@ def resolve_location(post: Dict[str, Any]) -> Dict[str, Any]:
             
         # Add provided location hints (from image analysis)
         location_hints = post.get("location_hints", [])
+        # Handle location_hints as either string or list
+        if isinstance(location_hints, str) and location_hints:
+            location_hints = [location_hints]
+        elif not isinstance(location_hints, list):
+            location_hints = []
+        
         if location_hints:
             for hint in location_hints:
                 if hint and hint not in extracted:
@@ -238,7 +244,8 @@ async def resolve_location_async(
     image_url: Optional[str] = None,
     gps: Optional[Dict[str, float]] = None,
     extracted_locations: Optional[List[str]] = None,
-    location_hints: Optional[List[str]] = None
+    location_hints: Optional[List[str]] = None,
+    image_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Async wrapper for location resolution.
@@ -252,6 +259,7 @@ async def resolve_location_async(
         gps: GPS coordinates dict
         extracted_locations: Pre-extracted locations
         location_hints: Additional location hints (e.g. from Gemini)
+        image_path: Local path to the downloaded image (for visual context)
         
     Returns:
         Location result dict
@@ -263,7 +271,7 @@ async def resolve_location_async(
         "gps": gps,
         "extracted_locations": extracted_locations or [],
         "location_hints": location_hints or [],
-        "image_path": None  # Would need to download image for scene analysis
+        "image_path": image_path
     }
     
     return resolve_location(post)

@@ -20,7 +20,7 @@ import uvicorn
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -46,9 +46,9 @@ logger = logging.getLogger(__name__)
 # Module-level state
 # ---------------------------------------------------------------------------
 
-_config: dict = {}
+_config: Dict = {}
 _device: torch.device = torch.device("cpu")
-_model_cache: dict[str, tuple] = {}   # city → (model, spatial_proj, adj, node_feats, scaler)
+_model_cache: Dict[str, Tuple] = {}   # city → (model, spatial_proj, adj, node_feats, scaler)
 _startup_time: float = 0.0
 
 VALID_CITIES = ["Delhi", "Mumbai", "Bengaluru", "Chennai", "Patna"]
@@ -67,7 +67,7 @@ class CityPredictRequest(BaseModel):
 
 
 class BatchPredictRequest(BaseModel):
-    city_names: list[str]
+    city_names: List[str]
 
 
 class BBox(BaseModel):
@@ -79,9 +79,9 @@ class BBox(BaseModel):
 
 class AreaPredictRequest(BaseModel):
     bbox: BBox
-    area_id: str | None = None
-    reference_city: str | None = None
-    weather_context_city: str | None = None
+    area_id: Optional[str] = None
+    reference_city: Optional[str] = None
+    weather_context_city: Optional[str] = None
 
 
 class PredictionResponse(BaseModel):
@@ -101,7 +101,7 @@ class PredictionResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
-    cities_available: list[str]
+    cities_available: List[str]
     uptime_seconds: float
 
 
@@ -121,8 +121,8 @@ class EtaRequest(BaseModel):
     dest_lat: float
     dest_lon: float
     emergency_type: str = "ambulance"  # ambulance | fire | police | flood | accident
-    distance_km: float | None = None   # Optional pre-computed distance
-    osrm_eta_min: float | None = None  # Optional pre-computed OSRM ETA
+    distance_km: Optional[float] = None   # Optional pre-computed distance
+    osrm_eta_min: Optional[float] = None  # Optional pre-computed OSRM ETA
 
 
 class IndiaFactor(BaseModel):
@@ -140,15 +140,15 @@ class EtaResponse(BaseModel):
     congestion_score: float
     congestion_level: str
     confidence_pct: int
-    india_factors: list[IndiaFactor]
+    india_factors: List[IndiaFactor]
     route_recommendation: str
     latency_ms: float
 
 
 class IndiaFactorsRequest(BaseModel):
     city_name: str
-    lat: float | None = None
-    lon: float | None = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ def predict(request: CityPredictRequest) -> PredictionResponse:
 
 
 @app.post("/predict/batch")
-def predict_batch(request: BatchPredictRequest) -> list:
+def predict_batch(request: BatchPredictRequest) -> List:
     """Return live congestion predictions for multiple cities.
 
     Invalid or failed cities are returned as error dicts rather than

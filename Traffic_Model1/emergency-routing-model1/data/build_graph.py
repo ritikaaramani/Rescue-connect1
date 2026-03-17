@@ -17,6 +17,7 @@ No API keys needed — OpenStreetMap is free.
 """
 
 import logging
+from typing import Union, Optional, List, Dict
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # India-specific road class weights for GCN edge weights.
 # Lower weight = harder/slower road for emergency vehicles.
-INDIA_ROAD_WEIGHTS: dict = {
+INDIA_ROAD_WEIGHTS: Dict = {
     "motorway":     1.00,
     "trunk":        0.95,
     "primary":      0.85,
@@ -53,7 +54,7 @@ INDIA_ROAD_WEIGHTS: dict = {
 }
 
 # OSM tags relevant for India-specific feature penalties
-INDIA_OSM_TAGS: dict = {
+INDIA_OSM_TAGS: Dict = {
     "surface":    ["unpaved", "dirt", "gravel", "mud"],
     "smoothness": ["bad", "very_bad", "horrible", "very_horrible"],
     "highway":    ["speed_camera", "crossing"],
@@ -61,7 +62,7 @@ INDIA_OSM_TAGS: dict = {
 
 # Default speed limits by road class (km/h) for India.
 # Used when OSM maxspeed tag is absent.
-INDIA_DEFAULT_SPEEDS: dict = {
+INDIA_DEFAULT_SPEEDS: Dict = {
     "motorway":     100,
     "trunk":         80,
     "primary":       60,
@@ -384,8 +385,8 @@ def extract_node_features(graph: nx.MultiDiGraph) -> pd.DataFrame:
             adjacent_edges = list(graph.out_edges(node_id, data=True)) + \
                              list(graph.in_edges(node_id, data=True))
 
-            speed_limits: list[float] = []
-            road_weights: list[float] = []
+            speed_limits: List[float] = []
+            road_weights: List[float] = []
 
             for *_, edata in adjacent_edges:
                 try:
@@ -606,7 +607,7 @@ def build_city_graph(city_name: str, config: dict) -> tuple:
 def build_area_graph(
     bbox: dict,
     config: dict,
-    area_id: str | None = None,
+    area_id: Optional[str] = None,
 ) -> tuple:
     """Build or load cached graph artifacts for an arbitrary bbox area."""
     b = _normalise_bbox(bbox)

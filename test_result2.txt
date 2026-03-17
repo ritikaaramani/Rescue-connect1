@@ -1,0 +1,24 @@
+HTTP Status: 200
+{
+  "is_disaster": false,
+  "disaster_type": "none",
+  "severity": "low",
+  "description": "A calm beach scene with waves gently lapping at the shore",
+  "detected_elements": [
+    "ocean",
+    "sand",
+    "waves"
+  ],
+  "location_hints": [],
+  "people_affected": "none",
+  "urgency_score": 1
+}
+
+is_disaster: False (type: bool)
+disaster_type: none (type: str)
+severity: low (type: str)
+description: A calm beach scene with waves gently lapping at the shore (type: str)
+detected_elements: ['ocean', 'sand', 'waves'] (type: list)
+location_hints: [] (type: list)
+people_affected: none (type: str)
+urgency_score: 1 (type: int)
