@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'citizen_app_screen.dart';
 import 'main_shell.dart';
@@ -12,6 +13,13 @@ class LandingScreen extends StatelessWidget {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => screen),
     );
+  }
+
+  Future<void> _launchURL(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url)) {
+      debugPrint('Could not launch $url');
+    }
   }
 
   @override
@@ -62,10 +70,18 @@ class LandingScreen extends StatelessWidget {
           ),
           
           // Content
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Navbar
+          LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Navbar
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 24),
                 child: Row(
@@ -153,17 +169,17 @@ class LandingScreen extends StatelessWidget {
                       children: [
                         _buildLoginButton(
                           title: 'Login as Reporter',
-                          onTap: () => _navigateTo(context, const CitizenAppScreen()),
+                          onTap: () => _launchURL('http://localhost:5174'),
                         ),
                         const SizedBox(width: 16),
                         _buildLoginButton(
                           title: 'Login as Authority/Dispatcher',
-                          onTap: () => _navigateTo(context, const MainShell()),
+                          onTap: () => _launchURL('http://localhost:5173'),
                         ),
                         const SizedBox(width: 16),
                         _buildLoginButton(
                           title: 'Login as Rescue Team',
-                          onTap: () => _navigateTo(context, const VehicleAppScreen()),
+                          onTap: () => _navigateTo(context, const MainShell()),
                         ),
                       ],
                     ),
@@ -191,6 +207,11 @@ class LandingScreen extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
