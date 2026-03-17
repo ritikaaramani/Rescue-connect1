@@ -6,97 +6,81 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:latlong2/latlong.dart';
 import '../models/route_model.dart';
-
-// ── Mock Emergency Requests Generator ──────────────────────────────────────
-
-final _rng = Random();
-
-// Indore area locations for realistic mock data
-const _indoreLocations = [
-  {'label': 'Rajwada Palace, Indore', 'lat': 22.7196, 'lng': 75.8577},
-  {'label': 'Palasia Square', 'lat': 22.7234, 'lng': 75.8821},
-  {'label': 'Vijay Nagar', 'lat': 22.7533, 'lng': 75.8937},
-  {'label': 'Sapna Sangeeta Rd', 'lat': 22.7282, 'lng': 75.8744},
-  {'label': 'MR-10 Ring Road', 'lat': 22.7600, 'lng': 75.9200},
-  {'label': 'Bhawarkuan Square', 'lat': 22.7053, 'lng': 75.8679},
-  {'label': 'Rau Circle', 'lat': 22.6568, 'lng': 75.8250},
-  {'label': 'LIG Colony', 'lat': 22.6913, 'lng': 75.8679},
-  {'label': 'Bombay Hospital', 'lat': 22.7500, 'lng': 75.9100},
-  {'label': 'MY Hospital', 'lat': 22.7180, 'lng': 75.8520},
-  {'label': 'Indore Airport', 'lat': 22.7216, 'lng': 75.8019},
-  {'label': 'Geeta Bhawan Square', 'lat': 22.7136, 'lng': 75.8647},
-  {'label': 'Scheme 78', 'lat': 22.7401, 'lng': 75.9050},
-  {'label': 'Khajrana Temple Rd', 'lat': 22.7327, 'lng': 75.9097},
-  {'label': 'AB Road, Mhow Naka', 'lat': 22.6900, 'lng': 75.8500},
-];
-
-const _hospitals = [
-  {'label': 'Apollo Hospital, Indore', 'lat': 22.7533, 'lng': 75.8937},
-  {'label': 'CHL Hospital', 'lat': 22.7441, 'lng': 75.8901},
-  {'label': 'Medanta Super Specialty', 'lat': 22.7600, 'lng': 75.9000},
-  {'label': 'Bombay Hospital Indore', 'lat': 22.7500, 'lng': 75.9100},
-  {'label': 'MY Hospital', 'lat': 22.7180, 'lng': 75.8520},
-];
-
-const _callers = [
-  'Rajesh Kumar — #112',
-  'Smt. Priya Sharma',
-  'PCR Van Patrol Unit',
-  'Indore Fire Station #3',
-  'Auto Driver — Bystander',
-  'Traffic Police HQ',
-  'Control Room Relay',
-  'NDRF Alert System',
-  'Ambulance Dispatch',
-  'Citizen App Report',
-];
-
-EmergencyRequest _generateRequest(int index) {
-  final origin = _indoreLocations[_rng.nextInt(_indoreLocations.length)];
-  final dest = _hospitals[_rng.nextInt(_hospitals.length)];
-  final types = EmergencyType.values;
-  final priorities = Priority.values;
-
-  return EmergencyRequest(
-    id: 'REQ-${1000 + index}',
-    type: types[_rng.nextInt(types.length)],
-    priority: priorities[_rng.nextInt(priorities.length)],
-    originCoord: LatLng(origin['lat'] as double, origin['lng'] as double),
-    destCoord: LatLng(dest['lat'] as double, dest['lng'] as double),
-    originLabel: origin['label'] as String,
-    destLabel: dest['label'] as String,
-    timestamp: DateTime.now().subtract(Duration(minutes: _rng.nextInt(45))),
-    callerInfo: _callers[_rng.nextInt(_callers.length)],
-    witnessReports: [
-      if (_rng.nextBool()) WitnessReport(reporterId: 'USR-${1000 + _rng.nextInt(9000)}', textNotes: 'Loud crash heard.', hazardTags: ['Vehicle overturned', 'Possible fuel leak'], hasPhoto: true),
-      if (_rng.nextBool()) WitnessReport(reporterId: 'USR-${1000 + _rng.nextInt(9000)}', textNotes: 'Need an ambulance fast', hazardTags: ['Multiple injured'], hasPhoto: true),
-      if (_rng.nextBool()) WitnessReport(reporterId: 'USR-${1000 + _rng.nextInt(9000)}', textNotes: 'Road is blocked', hazardTags: ['Road debris'], hasPhoto: false),
-    ],
-    videoFeedUrl: _rng.nextBool() ? 'live_feed_active' : null,
-    ambulanceEtaMin: 4 + _rng.nextInt(10),
-    patientCondition: _rng.nextBool() ? 'Unconscious' : 'Stable',
-    assignedHospital: dest['label'] as String,
-  );
-}
+import '../services/backend_service.dart';
 
 // ── Providers ──────────────────────────────────────────────────────────────
+
+final mainAppTabProvider = StateProvider<int>((ref) => 0);
+final selectedIncidentForRoutingProvider = StateProvider<EmergencyRequest?>((ref) => null);
 
 // Emergency Requests
 class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
   Timer? _timer;
+  final Ref ref;
 
-  EmergencyRequestsNotifier() : super([]) {
+  EmergencyRequestsNotifier(this.ref) : super([]) {
     _load();
-
-    // Add a new one every 30s
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      final req = _generateRequest(state.length + 100);
-      state = [req, ...state]
-        ..sort((a, b) => a.priority.index.compareTo(b.priority.index));
-      _save();
+    _fetchRealData();
+    // Poll every 15s instead of generating mocks
+    _timer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _fetchRealData();
     });
   }
 
+  Future<void> _fetchRealData() async {
+    try {
+      final backendService = ref.read(backendServiceProvider);
+      final incidents = await backendService.getActiveIncidents();
+      
+      final newRequests = incidents.map((data) {
+        return EmergencyRequest(
+          id: data['id'] ?? 'N/A',
+          type: _parseEmergencyType(data['type']),
+          rawType: data['type']?.toString() ?? 'Emergency',
+          priority: _parsePriority(data['priority']),
+          originCoord: LatLng(data['originCoord']['latitude'], data['originCoord']['longitude']),
+          destCoord: LatLng(data['destCoord']['latitude'], data['destCoord']['longitude']),
+          originLabel: data['originLabel'] ?? 'Unknown Location',
+          destLabel: data['destLabel'] ?? 'Nearest Hospital',
+          timestamp: DateTime.tryParse(data['timestamp'] ?? '') ?? DateTime.now(),
+          callerInfo: data['callerInfo'] ?? 'Citizen Report',
+          witnessReports: [], // Can parse witnesses here if provided
+          videoFeedUrl: data['videoFeedUrl'],
+          ambulanceEtaMin: data['ambulanceEtaMin'] ?? 10,
+          patientCondition: data['patientCondition'] ?? 'Unknown',
+          assignedHospital: data['assignedHospital'],
+          state: _parseState(data['state']),
+        );
+      }).toList();
+      
+      newRequests.sort((a, b) => a.priority.index.compareTo(b.priority.index));
+      state = newRequests;
+      _save();
+    } catch (e) {
+      debugPrint('Error polling active incidents: $e');
+    }
+  }
+
+  Priority _parsePriority(dynamic priorityStr) {
+    if (priorityStr == 'High') return Priority.high;
+    if (priorityStr == 'Medium') return Priority.medium;
+    return Priority.low;
+  }
+
+  EmergencyType _parseEmergencyType(dynamic typeStr) {
+    final str = typeStr.toString().toLowerCase();
+    if (str.contains('medical')) return EmergencyType.ambulance;
+    if (str.contains('fire')) return EmergencyType.fire;
+    return EmergencyType.accident;
+  }
+
+  IncidentState _parseState(dynamic stateStr) {
+    final str = stateStr.toString().toLowerCase();
+    if (str.contains('assigned')) return IncidentState.dispatched;
+    if (str.contains('in-progress')) return IncidentState.enRoute;
+    if (str.contains('completed')) return IncidentState.completed;
+    return IncidentState.reported;
+  }
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final data = prefs.getString('emergency_requests');
@@ -106,17 +90,8 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
         state = list.map((e) => EmergencyRequest.fromJson(e)).toList();
       } catch (e) {
         debugPrint('Error loading requests: $e');
-        _seed();
       }
-    } else {
-      _seed();
     }
-  }
-
-  void _seed() {
-    state = List.generate(6, (i) => _generateRequest(i))
-      ..sort((a, b) => a.priority.index.compareTo(b.priority.index));
-    _save();
   }
 
   Future<void> _save() async {
@@ -156,7 +131,7 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
 
 final emergencyRequestsProvider =
     StateNotifierProvider<EmergencyRequestsNotifier, List<EmergencyRequest>>(
-  (ref) => EmergencyRequestsNotifier(),
+  (ref) => EmergencyRequestsNotifier(ref),
 );
 
 // Active Dispatches (multi-dispatch)

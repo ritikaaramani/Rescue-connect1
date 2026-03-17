@@ -28,7 +28,7 @@ timeout /t 3 /nobreak >nul
 
 :: --- Flutter App (--no-dds disables the Dart Development Service which was failing) ---
 echo [3/3] Starting Flutter Emergency Routing App on Web...
-start "Flutter-App" cmd /k "cd /d %~dp0Traffic_Model1\emergency_routing_flutter && flutter run -d chrome --no-dds"
+start "Flutter-App" cmd /k "cd /d %~dp0Traffic_Model1\emergency_routing_flutter && flutter run -d chrome --web-port 8080 --web-browser-flag \"--disable-web-security\" --no-dds"
 
 echo.
 echo =====================================================
