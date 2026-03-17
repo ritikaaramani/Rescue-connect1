@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/theme.dart';
 import 'screens/landing_screen.dart'; // import the new landing screen
+import 'screens/main_shell.dart';
 
 const String _supabaseUrl = String.fromEnvironment(
   'SUPABASE_URL',
@@ -34,10 +35,18 @@ class EmergencyRoutingApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final query = Uri.base.queryParameters;
+    final dispatchRequested =
+        query['dispatch'] == '1' || query['open'] == 'live-map' || query['open'] == 'incoming';
+    final openTarget = (query['open'] ?? '').toLowerCase();
+    final initialTab = openTarget == 'live-map' ? 1 : 0;
+
     return MaterialApp(
       title: 'Emergency Routing',
       theme: buildAppTheme(),
-      home: const LandingScreen(), // Use LandingScreen
+      home: dispatchRequested
+          ? MainShell(initialTab: initialTab)
+          : const LandingScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

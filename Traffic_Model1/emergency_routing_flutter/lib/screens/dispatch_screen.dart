@@ -29,6 +29,7 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
   // 0 = INCOMING, 1 = ACTIVE, 2 = ALERTS
   late int _tab;
   bool _showMap = true;
+  String? _autoOpenedDialogForPostId;
   final _mapCtrl = MapController();
   Timer? _refreshTimer;
 
@@ -203,6 +204,32 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
     final pending = allRequests.where((r) => r.state == IncidentState.reported).toList();
     final active = ref.watch(activeDispatchesProvider);
     final alerts = ref.watch(alertsProvider);
+    final focusPostId = ref.watch(dispatchFocusPostIdProvider);
+
+    if (_tab == 0 &&
+        focusPostId != null &&
+        focusPostId.isNotEmpty &&
+        _autoOpenedDialogForPostId != focusPostId) {
+      EmergencyRequest? match;
+      for (final req in pending) {
+        if (req.id == focusPostId) {
+          match = req;
+          break;
+        }
+      }
+
+      if (match != null) {
+        final reqToOpen = match;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _showDispatchDialog(reqToOpen);
+          setState(() {
+            _autoOpenedDialogForPostId = focusPostId;
+          });
+          ref.read(dispatchFocusPostIdProvider.notifier).state = null;
+        });
+      }
+    }
 
     return Scaffold(
       backgroundColor: kBackground,

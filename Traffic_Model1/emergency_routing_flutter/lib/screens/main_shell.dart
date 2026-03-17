@@ -16,7 +16,9 @@ import 'analytics_screen.dart';
 import 'mission_logs_screen.dart';
 
 class MainShell extends ConsumerStatefulWidget {
-  const MainShell({super.key});
+  final int initialTab;
+
+  const MainShell({super.key, this.initialTab = 0});
 
   @override
   ConsumerState<MainShell> createState() => _MainShellState();
@@ -27,8 +29,15 @@ class _MainShellState extends ConsumerState<MainShell> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(mainAppTabProvider.notifier).state = widget.initialTab;
+      final postId = Uri.base.queryParameters['post_id'];
+      if (postId != null && postId.isNotEmpty) {
+        ref.read(dispatchFocusPostIdProvider.notifier).state = postId;
+      }
       ref.read(healthStateProvider.notifier).fetch();
       ref.read(modelInfoStateProvider.notifier).fetch();
+      // Eagerly initialize incident polling so pending dispatches are consumed.
+      ref.read(emergencyRequestsProvider);
     });
   }
 

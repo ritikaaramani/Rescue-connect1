@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import '../models/route_model.dart';
 import '../services/backend_service.dart';
@@ -12,18 +13,28 @@ import '../services/backend_service.dart';
 
 final mainAppTabProvider = StateProvider<int>((ref) => 0);
 final selectedIncidentForRoutingProvider = StateProvider<EmergencyRequest?>((ref) => null);
+final dispatchFocusPostIdProvider = StateProvider<String?>((ref) => null);
+
+// Supabase direct config (same as backend_service.dart)
+const _supabaseUrl = 'https://uhlnwyrikuiprkuubloh.supabase.co';
+const _supabaseKey = 'sb_publishable_3AB7L_OofX-B7hlO7mWUrA_vrSq5cBO';
 
 // Emergency Requests
 class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
   Timer? _timer;
+  Timer? _pendingDispatchTimer;
   final Ref ref;
 
   EmergencyRequestsNotifier(this.ref) : super([]) {
     _load();
     _fetchRealData();
-    // Poll every 15s instead of generating mocks
+    // Poll every 15s for general incident data
     _timer = Timer.periodic(const Duration(seconds: 15), (_) {
       _fetchRealData();
+    });
+    // Poll every 5s for authority-triggered dispatches
+    _pendingDispatchTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _checkPendingFlutterDispatches();
     });
   }
 
@@ -61,6 +72,116 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
     }
   }
 
+  /// Check Supabase for posts where flutter_dispatch_pending=true.
+  /// When found: clear the flag, navigate to Live Map, auto-fill the incident,
+  /// and add to the Active Missions (dispatches) list.
+  Future<void> _checkPendingFlutterDispatches() async {
+    try {
+      final url = Uri.parse(
+        '$_supabaseUrl/rest/v1/posts?flutter_dispatch_pending=eq.true&limit=5',
+      );
+      final response = await http.get(url, headers: {
+        'apikey': _supabaseKey,
+        'Authorization': 'Bearer $_supabaseKey',
+        'Content-Type': 'application/json',
+      });
+
+      if (response.statusCode != 200) return;
+      final List<dynamic> posts = json.decode(response.body);
+      if (posts.isEmpty) return;
+
+      for (final post in posts) {
+        // 1. Clear the flag immediately to avoid double-processing
+        final postId = post['id'].toString();
+        await http.patch(
+          Uri.parse('$_supabaseUrl/rest/v1/posts?id=eq.$postId'),
+          headers: {
+            'apikey': _supabaseKey,
+            'Authorization': 'Bearer $_supabaseKey',
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal',
+          },
+          body: json.encode({'flutter_dispatch_pending': false}),
+        );
+
+        // 2. Extract coordinates
+        double lat = 22.7196; // Default Indore
+        double lon = 75.8577;
+        if (post['inferred_latitude'] != null && post['inferred_longitude'] != null) {
+          lat = double.tryParse(post['inferred_latitude'].toString()) ?? lat;
+          lon = double.tryParse(post['inferred_longitude'].toString()) ?? lon;
+        } else if (post['latitude'] != null && post['longitude'] != null) {
+          lat = double.tryParse(post['latitude'].toString()) ?? lat;
+          lon = double.tryParse(post['longitude'].toString()) ?? lon;
+        } else if (post['location'] is Map) {
+          final location = post['location'] as Map;
+          final dynamic rawLat = location['lat'] ?? location['latitude'];
+          final dynamic rawLon = location['lon'] ?? location['longitude'];
+          if (rawLat != null && rawLon != null) {
+            lat = double.tryParse(rawLat.toString()) ?? lat;
+            lon = double.tryParse(rawLon.toString()) ?? lon;
+          }
+        }
+
+        // 3. Extract incident type & label
+        final rawType = post['disaster_type']?.toString() ?? 'Flood';
+        final EmergencyType eType = _parseEmergencyType(rawType);
+        String locLabel = 'Disaster Location';
+        if (post['extracted_locations'] is List &&
+            (post['extracted_locations'] as List).isNotEmpty) {
+          locLabel = post['extracted_locations'][0].toString();
+        }
+
+        // 4. Build EmergencyRequest for HomeScreen auto-fill
+        final coord = LatLng(lat, lon);
+        final req = EmergencyRequest(
+          id: postId,
+          type: eType,
+          rawType: rawType,
+          priority: Priority.high,
+          originCoord: coord,
+          destCoord: LatLng(lat + 0.015, lon + 0.02), // Rough hospital direction
+          originLabel: locLabel,
+          destLabel: 'Nearest Hospital',
+          timestamp: DateTime.tryParse(post['created_at'] ?? '') ?? DateTime.now(),
+          callerInfo: 'Authority Dispatch',
+          witnessReports: [],
+          videoFeedUrl: post['image_url'],
+          ambulanceEtaMin: 10,
+          patientCondition: 'Unknown',
+          assignedHospital: null,
+          state: IncidentState.dispatched,
+        );
+
+        // 5. Set the incident for HomeScreen → triggers auto-fill + hospital search
+        ref.read(selectedIncidentForRoutingProvider.notifier).state = req;
+
+        // 6. Navigate to Incoming Dispatch tab and focus this report
+        ref.read(mainAppTabProvider.notifier).state = 0;
+        ref.read(dispatchFocusPostIdProvider.notifier).state = postId;
+
+        // 7. Add an immediate ActiveDispatch entry so MISSIONS tab also updates
+        final dispatch = ActiveDispatch(
+          id: 'AUTH-$postId',
+          type: eType,
+          origin: locLabel,
+          destination: 'Nearest Hospital',
+          originCoord: coord,
+          destCoord: LatLng(lat + 0.015, lon + 0.02),
+          etaMin: 10.0,
+          dispatchedAt: DateTime.now(),
+          cityName: 'Disaster Zone',
+          priority: Priority.high,
+        );
+        ref.read(activeDispatchesProvider.notifier).addDispatch(dispatch);
+
+        debugPrint('✅ Flutter dispatch triggered for post $postId at ($lat, $lon)');
+      }
+    } catch (e) {
+      debugPrint('Error checking pending flutter dispatches: $e');
+    }
+  }
+
   Priority _parsePriority(dynamic priorityStr) {
     if (priorityStr == 'High') return Priority.high;
     if (priorityStr == 'Medium') return Priority.medium;
@@ -69,8 +190,13 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
 
   EmergencyType _parseEmergencyType(dynamic typeStr) {
     final str = typeStr.toString().toLowerCase();
-    if (str.contains('medical')) return EmergencyType.ambulance;
+    if (str.contains('flood')) return EmergencyType.flood;
     if (str.contains('fire')) return EmergencyType.fire;
+    if (str.contains('police') || str.contains('crime')) return EmergencyType.police;
+    if (str.contains('medical') || str.contains('ambulance') || str.contains('injury')) {
+      return EmergencyType.ambulance;
+    }
+    if (str.contains('accident') || str.contains('crash')) return EmergencyType.accident;
     return EmergencyType.accident;
   }
 
@@ -103,6 +229,7 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
   @override
   void dispose() {
     _timer?.cancel();
+    _pendingDispatchTimer?.cancel();
     super.dispose();
   }
 

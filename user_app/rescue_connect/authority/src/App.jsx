@@ -442,10 +442,83 @@ export default function App() {
     setCurrentPage('map')
   }
 
-  // Navigate to dispatch with a specific post
-  function dispatchTeam(post) {
+  // Dispatch team: write to Supabase to signal the Flutter app
+  async function dispatchTeam(post) {
     setDispatchPost(post)
-    setCurrentPage('dispatch')
+
+    // Open tab immediately in click context so browser popup blockers don't block it.
+    const popup = window.open('about:blank', '_blank')
+    try {
+      const { error } = await supabase
+        .from('posts')
+        .update({
+          flutter_dispatch_pending: true,
+          dispatch_status: 'assigned'
+        })
+        .eq('id', post.id)
+
+      if (error) {
+        if (popup && !popup.closed) popup.close()
+        console.error('Dispatch signal failed:', error)
+        alert('Failed to signal Flutter dispatch: ' + error.message)
+        return
+      }
+
+      // Redirect authority view directly to Flutter rescue Live Map flow.
+      const configuredFlutterUrl = import.meta.env.VITE_FLUTTER_WEB_URL
+      const flutterCandidates = [
+        configuredFlutterUrl,
+        'http://localhost:8080',
+        'http://localhost:5175',
+        'http://localhost:3000'
+      ].filter(Boolean)
+
+      async function pickReachableFlutterUrl() {
+        for (const baseUrl of flutterCandidates) {
+          try {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 1200)
+            await fetch(baseUrl, {
+              method: 'GET',
+              mode: 'no-cors',
+              cache: 'no-store',
+              signal: controller.signal
+            })
+            clearTimeout(timeoutId)
+            return baseUrl
+          } catch {
+            // Try next candidate.
+          }
+        }
+        return flutterCandidates[0]
+      }
+
+      const flutterBaseUrl = await pickReachableFlutterUrl()
+      const lat = post?.inferred_latitude ?? post?.latitude ?? ''
+      const lon = post?.inferred_longitude ?? post?.longitude ?? ''
+      const label = Array.isArray(post?.extracted_locations) && post.extracted_locations.length > 0
+        ? post.extracted_locations[0]
+        : (post?.location || 'Disaster Location')
+
+      const redirectUrl = new URL(flutterBaseUrl)
+      redirectUrl.searchParams.set('dispatch', '1')
+      redirectUrl.searchParams.set('open', 'incoming')
+      redirectUrl.searchParams.set('post_id', String(post?.id || ''))
+      redirectUrl.searchParams.set('type', String(post?.disaster_type || 'Emergency'))
+      redirectUrl.searchParams.set('label', String(label))
+      if (lat !== '') redirectUrl.searchParams.set('lat', String(lat))
+      if (lon !== '') redirectUrl.searchParams.set('lon', String(lon))
+
+      if (popup && !popup.closed) {
+        popup.location.href = redirectUrl.toString()
+      } else {
+        window.open(redirectUrl.toString(), '_blank')
+      }
+    } catch (e) {
+      if (popup && !popup.closed) popup.close()
+      console.error('Dispatch error:', e)
+      alert('Dispatch failed: ' + e.message)
+    }
   }
 
   // Render current page
@@ -457,6 +530,52 @@ export default function App() {
         return <MapView selectedPost={selectedPost} onClearSelection={() => setSelectedPost(null)} onDispatchTeam={dispatchTeam} />
       case 'dispatch':
         return <DispatchView selectedPost={dispatchPost} onClearSelection={() => setDispatchPost(null)} />
+      case 'dispatch_triggered':
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
+            {/* Success Card */}
+            <div className="bg-gray-800 border border-green-500/50 rounded-2xl p-10 max-w-lg w-full text-center shadow-2xl shadow-green-500/10">
+              <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-green-500/40">
+                <svg className="w-8 h-8 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Dispatch Triggered! 🚀</h2>
+              <p className="text-gray-400 mb-1">
+                <span className="text-orange-400 font-semibold">{dispatchPost?.disaster_type || 'Incident'}</span>
+                {' '}at{' '}
+                <span className="text-white font-medium">{dispatchPost?.extracted_locations?.[0] || 'the location'}</span>
+              </p>
+              <p className="text-gray-500 text-sm mb-2">
+                📍 Coordinates: ({(dispatchPost?.inferred_latitude || dispatchPost?.latitude)?.toFixed(4)}, {(dispatchPost?.inferred_longitude || dispatchPost?.longitude)?.toFixed(4)})
+              </p>
+              <div className="mt-6 p-4 bg-green-500/10 border border-green-500/30 rounded-xl text-sm">
+                <p className="text-green-300 font-semibold mb-1">✅ Flutter Dispatch App Notified</p>
+                <p className="text-gray-400">The field team app will automatically:</p>
+                <ul className="text-gray-400 mt-2 space-y-1 text-left list-none">
+                  <li>• Open the <strong className="text-white">Live Map</strong> screen</li>
+                  <li>• Pre-fill disaster type &amp; coordinates</li>
+                  <li>• Locate the nearest hospital</li>
+                  <li>• Add to <strong className="text-white">Active Missions</strong></li>
+                </ul>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setCurrentPage('map')}
+                  className="flex-1 px-4 py-2.5 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm font-medium transition-colors"
+                >
+                  ← Back to Map
+                </button>
+                <button
+                  onClick={() => setCurrentPage('dashboard')}
+                  className="flex-1 px-4 py-2.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium transition-colors"
+                >
+                  Dashboard
+                </button>
+              </div>
+            </div>
+          </div>
+        )
       case 'heatmap':
         return <HeatmapView />
       case 'settings':
