@@ -420,6 +420,12 @@ export default function PostsTable({ onViewOnMap }) {
     }
   }
 
+  function getPostCoordinates(post) {
+    const lat = post?.inferred_latitude ?? post?.latitude ?? null
+    const lng = post?.inferred_longitude ?? post?.longitude ?? null
+    return { lat, lng }
+  }
+
   return (
     <div>
       {/* ML Backend Notice Dialog */}
@@ -631,7 +637,11 @@ export default function PostsTable({ onViewOnMap }) {
       )}
 
       <div className="grid gap-4">
-        {posts.map((post) => (
+        {posts.map((post) => {
+          const { lat, lng } = getPostCoordinates(post)
+          const hasCoordinates = lat !== null && lng !== null
+
+          return (
           <div key={post.id} className={`card flex gap-4 ${post.status === 'urgent' ? 'border-2 border-red-500' : ''}`}>
             {/* Media (Image or Video) */}
             {post.image_url && (
@@ -731,11 +741,11 @@ export default function PostsTable({ onViewOnMap }) {
                   )}
 
                   {/* Geolocation Info */}
-                  {post.inferred_latitude && post.inferred_longitude && (
+                  {hasCoordinates && (
                     <div className="mt-2 p-2 bg-green-50 rounded">
                       <span className="text-xs font-medium text-green-700">📍 Inferred Location:</span>
                       <div className="text-xs text-gray-600 mt-1">
-                        <p>Coordinates: ({post.inferred_latitude.toFixed(4)}, {post.inferred_longitude.toFixed(4)})</p>
+                        <p>Coordinates: ({lat.toFixed(4)}, {lng.toFixed(4)})</p>
                         {post.location_confidence && (
                           <p>Confidence: {(post.location_confidence * 100).toFixed(0)}%</p>
                         )}
@@ -769,7 +779,7 @@ export default function PostsTable({ onViewOnMap }) {
               {/* Actions */}
               <div className="mt-3 flex flex-wrap gap-2">
                 {/* AI Process Buttons */}
-                {!post.ai_processed && (
+                {!post.ai_processed && post.image_url && (
                   <>
                     <button
                       onClick={() => {
@@ -914,7 +924,7 @@ export default function PostsTable({ onViewOnMap }) {
                   </button>
                 )}
                 {/* View on Map button - only show if post has coordinates */}
-                {post.inferred_latitude && post.inferred_longitude && onViewOnMap && (
+                {hasCoordinates && onViewOnMap && (
                   <button
                     onClick={() => onViewOnMap(post)}
                     className="px-3 py-1 bg-blue-600 text-white rounded text-sm flex items-center gap-1 hover:bg-blue-700"
@@ -926,7 +936,7 @@ export default function PostsTable({ onViewOnMap }) {
               </div>
             </div>
           </div>
-        ))}
+        )})}
       </div>
     </div>
   )

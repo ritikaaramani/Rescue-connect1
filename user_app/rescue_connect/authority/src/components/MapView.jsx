@@ -32,16 +32,29 @@ const icons = {
   hospital: createIcon('green')
 }
 
+function getPostCoordinates(post) {
+  const lat = post?.inferred_latitude ?? post?.latitude ?? null
+  const lng = post?.inferred_longitude ?? post?.longitude ?? null
+  return { lat, lng }
+}
+
+function hasPostCoordinates(post) {
+  const { lat, lng } = getPostCoordinates(post)
+  return lat !== null && lng !== null
+}
+
 // Component to fit map bounds to markers
 function FitBounds({ posts }) {
   const map = useMap()
 
   useEffect(() => {
     if (posts.length > 0) {
-      const bounds = posts.map(p => [
-        p.inferred_latitude || p.latitude, 
-        p.inferred_longitude || p.longitude
-      ]).filter(coord => coord[0] && coord[1])
+      const bounds = posts
+        .map((p) => {
+          const { lat, lng } = getPostCoordinates(p)
+          return [lat, lng]
+        })
+        .filter((coord) => coord[0] !== null && coord[1] !== null)
       if (bounds.length > 0) {
         map.fitBounds(bounds, { padding: [50, 50] })
       }
@@ -57,9 +70,8 @@ function CenterOnPost({ post }) {
 
   useEffect(() => {
     if (post) {
-      const lat = post.inferred_latitude || post.latitude
-      const lng = post.inferred_longitude || post.longitude
-      if (lat && lng) {
+      const { lat, lng } = getPostCoordinates(post)
+      if (lat !== null && lng !== null) {
         map.setView([lat, lng], 15)
       }
     }
@@ -179,6 +191,15 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
     return colors[severity?.toLowerCase()] || 'bg-gray-500'
   }
 
+  const selectedPostCoordinates = selectedPost ? getPostCoordinates(selectedPost) : { lat: null, lng: null }
+  const canDispatchSelectedPost = Boolean(
+    selectedPost &&
+    hasPostCoordinates(selectedPost) &&
+    selectedPost.status !== 'rejected' &&
+    selectedPost.dispatch_status !== 'resolved' &&
+    onDispatchTeam
+  )
+
   return (
     <div className="flex flex-col h-full">
       {/* Selected Post Action Banner */}
@@ -192,13 +213,13 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
                   📍 {selectedPost.disaster_type || 'Disaster'} - {selectedPost.extracted_locations?.[0] || selectedPost.location || 'Location'}
                 </p>
                 <p className="text-gray-300 text-sm">
-                  Coordinates: ({(selectedPost.inferred_latitude || selectedPost.latitude)?.toFixed(4)}, {(selectedPost.inferred_longitude || selectedPost.longitude)?.toFixed(4)})
+                  Coordinates: ({selectedPostCoordinates.lat?.toFixed(4)}, {selectedPostCoordinates.lng?.toFixed(4)})
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               {/* Dispatch Team Button */}
-              {(selectedPost.status === 'urgent' || selectedPost.status === 'verified') && onDispatchTeam && (
+              {canDispatchSelectedPost && (
                 <button
                   onClick={() => onDispatchTeam(selectedPost)}
                   className="px-4 py-2 bg-orange-600 text-white rounded-lg flex items-center gap-2 hover:bg-orange-700 font-medium"
@@ -252,7 +273,9 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
       {/* Map container */}
       <div className="flex-1 rounded-xl overflow-hidden border border-gray-700" style={{ minHeight: '500px' }}>
         <MapContainer
-          center={selectedPost ? [selectedPost.inferred_latitude || selectedPost.latitude, selectedPost.inferred_longitude || selectedPost.longitude] : defaultCenter}
+          center={selectedPost && selectedPostCoordinates.lat !== null && selectedPostCoordinates.lng !== null
+            ? [selectedPostCoordinates.lat, selectedPostCoordinates.lng]
+            : defaultCenter}
           zoom={selectedPost ? 15 : defaultZoom}
           style={{ height: '100%', width: '100%' }}
         >
@@ -270,10 +293,9 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
           {/* Render dispatch routes and hospital markers first so they are under the main clusters */}
           {posts.map(post => {
             const hasHospital = post.destination_hospital && post.destination_hospital.latitude && post.destination_hospital.longitude
-            const lat = post.inferred_latitude || post.latitude
-            const lng = post.inferred_longitude || post.longitude
+            const { lat, lng } = getPostCoordinates(post)
             
-            if (!hasHospital || !lat || !lng || post.dispatch_status === 'resolved') return null
+            if (!hasHospital || lat === null || lng === null || post.dispatch_status === 'resolved') return null
 
             const hospitalLat = post.destination_hospital.latitude
             const hospitalLng = post.destination_hospital.longitude
@@ -318,10 +340,9 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
             {posts.map(post => {
               const needs = extractNeeds(post)
               const isSelected = selectedPost && selectedPost.id === post.id
-              const lat = post.inferred_latitude || post.latitude
-              const lng = post.inferred_longitude || post.longitude
+              const { lat, lng } = getPostCoordinates(post)
               
-              if (!lat || !lng) return null;
+              if (lat === null || lng === null) return null;
               
               return (
               <Marker
