@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/backend_service.dart';
 import '../config/theme.dart';
 
@@ -19,9 +20,46 @@ class _CitizenAppScreenState extends ConsumerState<CitizenAppScreen> {
   bool _isInferring = false;
   bool _isReporting = false;
   String _inferredAddress = '';
-  List<double> _currentLocation = [22.7533, 75.8937]; // Default Indore
+  // Default is a fallback only — we prefer device GPS.
+  List<double> _currentLocation = [12.9716, 77.5946]; // Default Bengaluru
+  bool _hasGpsFix = false;
 
   final List<String> _types = ['Accident', 'Fire', 'Medical', 'Hazard', 'Protest'];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initGps();
+    });
+  }
+
+  Future<void> _initGps() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 8),
+      );
+      if (!mounted) return;
+      setState(() {
+        _currentLocation = [pos.latitude, pos.longitude];
+        _hasGpsFix = true;
+      });
+    } catch (_) {
+      // Keep fallback location
+    }
+  }
 
   Future<void> _inferLocation() async {
     setState(() => _isInferring = true);
@@ -110,6 +148,27 @@ class _CitizenAppScreenState extends ConsumerState<CitizenAppScreen> {
               children: [
                 const Text('Live Location Map', style: TextStyle(color: Colors.white24)),
                 Icon(Icons.person_pin_circle, size: 48, color: _isSmartWitnessMode ? kAiCyan : kEmergencyOrange),
+                Positioned(
+                  bottom: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: kCardBg.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: _hasGpsFix ? kSuccess : kWarning),
+                    ),
+                    child: Text(
+                      _hasGpsFix
+                          ? 'GPS: ${_currentLocation[0].toStringAsFixed(4)}, ${_currentLocation[1].toStringAsFixed(4)}'
+                          : 'GPS not available — using fallback',
+                      style: GoogleFonts.rajdhani(
+                        color: _hasGpsFix ? kSuccess : kWarning,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
                 if (_isSmartWitnessMode)
                   Positioned(
                     top: 16,

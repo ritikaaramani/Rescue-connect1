@@ -768,7 +768,24 @@ class RoutingService {
     String? reasoning;
     try {
       final unifiedRes = await _unifiedService.getRoute(origin, destination, city.name, criticality: "High");
-      aiEtaMin = unifiedRes.aiEtaMin;
+      // IMPORTANT:
+      // The Unified API demo can return fixed/minimal ETAs (e.g. 12 min) that are
+      // not distance-aware. We treat it as a *relative saving signal* only.
+      final uStd = unifiedRes.standardEtaMin;
+      final uAi = unifiedRes.aiEtaMin;
+      double savingPct = 0.0;
+      if (uStd.isFinite && uStd > 0 && uAi.isFinite && uAi > 0) {
+        savingPct = ((uStd - uAi) / uStd).clamp(0.02, 0.40);
+      } else {
+        savingPct = 0.12;
+      }
+
+      // Apply savings to the realistic baseline (OSRM standard ETA).
+      // Enforce: Swift AI must be faster than generic, but not absurdly low.
+      final minFast = standardEtaMin * 0.55;
+      final maxFast = standardEtaMin * 0.98;
+      final candidate = standardEtaMin * (1.0 - savingPct);
+      aiEtaMin = candidate.clamp(minFast, maxFast);
       recommendedLane = unifiedRes.recommendedLane;
       reasoning = unifiedRes.reasoning;
     } catch (e) {

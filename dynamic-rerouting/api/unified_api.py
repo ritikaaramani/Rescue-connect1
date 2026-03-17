@@ -182,10 +182,23 @@ class UnifiedRoutingResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 MOCK_HOSPITALS = [
-    {"id": "H-1", "name": "Indore Apollo Hospital", "location": [22.7533, 75.8937], "icu_beds_available": 5, "trauma_specialty": True},
-    {"id": "H-2", "name": "CHL Hospital", "location": [22.7441, 75.8901], "icu_beds_available": 2, "trauma_specialty": True},
-    {"id": "H-3", "name": "Medanta Super Specialty", "location": [22.7600, 75.9000], "icu_beds_available": 12, "trauma_specialty": True},
-    {"id": "H-4", "name": "Bombay Hospital Indore", "location": [22.7500, 75.9100], "icu_beds_available": 0, "trauma_specialty": False},
+    # Indore
+    {"id": "IN-H-1", "name": "Apollo Hospitals Indore", "location": [22.7533, 75.8937], "icu_beds_available": 5, "trauma_specialty": True},
+    {"id": "IN-H-2", "name": "CHL Hospital Indore", "location": [22.7441, 75.8901], "icu_beds_available": 2, "trauma_specialty": True},
+    {"id": "IN-H-3", "name": "Medanta Super Specialty (Indore)", "location": [22.7600, 75.9000], "icu_beds_available": 12, "trauma_specialty": True},
+    {"id": "IN-H-4", "name": "Bombay Hospital Indore", "location": [22.7500, 75.9100], "icu_beds_available": 0, "trauma_specialty": False},
+
+    # Bengaluru (Bangalore)
+    {"id": "BLR-H-1", "name": "Apollo Hospitals Bannerghatta Rd (Bengaluru)", "location": [12.8939, 77.5970], "icu_beds_available": 8, "trauma_specialty": True},
+    {"id": "BLR-H-2", "name": "Fortis Hospital Richmond Rd (Bengaluru)", "location": [12.9666, 77.6048], "icu_beds_available": 4, "trauma_specialty": True},
+    {"id": "BLR-H-3", "name": "NIMHANS Emergency (Bengaluru)", "location": [12.9406, 77.5969], "icu_beds_available": 6, "trauma_specialty": True},
+    {"id": "BLR-H-4", "name": "Manipal Hospital Old Airport Rd (Bengaluru)", "location": [12.9586, 77.6483], "icu_beds_available": 3, "trauma_specialty": True},
+
+    # Chennai
+    {"id": "CHE-H-1", "name": "Apollo Hospitals Greams Road (Chennai)", "location": [13.0604, 80.2496], "icu_beds_available": 10, "trauma_specialty": True},
+    {"id": "CHE-H-2", "name": "Fortis Malar Hospital (Chennai)", "location": [13.0197, 80.2574], "icu_beds_available": 5, "trauma_specialty": True},
+    {"id": "CHE-H-3", "name": "MIOT International (Chennai)", "location": [13.0267, 80.1973], "icu_beds_available": 7, "trauma_specialty": True},
+    {"id": "CHE-H-4", "name": "Government General Hospital (Chennai)", "location": [13.0878, 80.2767], "icu_beds_available": 2, "trauma_specialty": True},
 ]
 
 INCIDENT_LOG = []
@@ -238,16 +251,17 @@ def health():
     return {"status": "online", "models": ["M1-Traffic", "M2-Reliability", "M3-RL"], "version": "1.5.0-HIFI"}
 
 @app.get("/hospitals/nearest", response_model=List[Hospital])
-async def get_nearest_hospitals(lat: float, lon: float):
-    """Finds best hospitals based on proximity and ICU availability."""
+async def get_nearest_hospitals(lat: float, lon: float, limit: int = 3):
+    """Finds nearest hospitals (distance-first, ICU as tie-break)."""
     results = []
     for h in MOCK_HOSPITALS:
         dist = calculate_distance([lat, lon], h["location"])
         results.append(Hospital(**h, distance_km=round(dist, 2)))
     
-    # Sort by beds available (priority) then distance
-    results.sort(key=lambda x: (-x.icu_beds_available, x.distance_km))
-    return results[:3]
+    # True "nearest": sort by distance first, ICU beds only as tie-break
+    results.sort(key=lambda x: (x.distance_km, -x.icu_beds_available))
+    limit = max(1, min(int(limit), 10))
+    return results[:limit]
 
 @app.post("/incident/report")
 async def report_incident(report: IncidentReport):
@@ -906,16 +920,67 @@ async def get_all_vehicles(db: Session = Depends(get_db)):
         return {"vehicles": MOCK_VEHICLES}
 
 MOCK_HOSPITALS_LIST = [
-    {"id": "H-1", "name": "Indore Apollo Hospital",    "lat": 22.7533, "lon": 75.8937, "icu_beds": 5,  "trauma": True},
-    {"id": "H-2", "name": "CHL Hospital",              "lat": 22.7441, "lon": 75.8901, "icu_beds": 2,  "trauma": True},
-    {"id": "H-3", "name": "Medanta Super Specialty",   "lat": 22.7600, "lon": 75.9000, "icu_beds": 12, "trauma": True},
-    {"id": "H-4", "name": "Bombay Hospital Indore",    "lat": 22.7500, "lon": 75.9100, "icu_beds": 0,  "trauma": False},
+    # Indore
+    {"id": "IN-H-1", "name": "Apollo Hospitals Indore",              "lat": 22.7533, "lon": 75.8937, "icu_beds": 5,  "trauma": True},
+    {"id": "IN-H-2", "name": "CHL Hospital Indore",                  "lat": 22.7441, "lon": 75.8901, "icu_beds": 2,  "trauma": True},
+    {"id": "IN-H-3", "name": "Medanta Super Specialty (Indore)",     "lat": 22.7600, "lon": 75.9000, "icu_beds": 12, "trauma": True},
+    {"id": "IN-H-4", "name": "Bombay Hospital Indore",               "lat": 22.7500, "lon": 75.9100, "icu_beds": 0,  "trauma": False},
+
+    # Bengaluru (Bangalore)
+    {"id": "BLR-H-1", "name": "Apollo Bannerghatta Rd (Bengaluru)",  "lat": 12.8939, "lon": 77.5970, "icu_beds": 8,  "trauma": True},
+    {"id": "BLR-H-2", "name": "Fortis Richmond Rd (Bengaluru)",      "lat": 12.9666, "lon": 77.6048, "icu_beds": 4,  "trauma": True},
+    {"id": "BLR-H-3", "name": "NIMHANS Emergency (Bengaluru)",       "lat": 12.9406, "lon": 77.5969, "icu_beds": 6,  "trauma": True},
+    {"id": "BLR-H-4", "name": "Manipal Old Airport Rd (Bengaluru)",  "lat": 12.9586, "lon": 77.6483, "icu_beds": 3,  "trauma": True},
+
+    # Chennai
+    {"id": "CHE-H-1", "name": "Apollo Greams Road (Chennai)",        "lat": 13.0604, "lon": 80.2496, "icu_beds": 10, "trauma": True},
+    {"id": "CHE-H-2", "name": "Fortis Malar (Chennai)",              "lat": 13.0197, "lon": 80.2574, "icu_beds": 5,  "trauma": True},
+    {"id": "CHE-H-3", "name": "MIOT International (Chennai)",        "lat": 13.0267, "lon": 80.1973, "icu_beds": 7,  "trauma": True},
+    {"id": "CHE-H-4", "name": "Govt General Hospital (Chennai)",     "lat": 13.0878, "lon": 80.2767, "icu_beds": 2,  "trauma": True},
 ]
 
 @app.get("/hospitals/all")
 async def get_all_hospitals(db: Session = Depends(get_db)):
     """Fetch all hospitals."""
     try:
+        # Prefer Supabase hospitals table when configured (so UI matches your DB updates)
+        import os, httpx as _httpx
+        url = os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        if (not db) and url and key:
+            try:
+                async with _httpx.AsyncClient(timeout=6) as client:
+                    resp = await client.get(
+                        f"{url}/rest/v1/hospitals?select=*",
+                        headers={
+                            "apikey": key,
+                            "Authorization": f"Bearer {key}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    if resp.status_code == 200:
+                        rows = resp.json()
+                        hospitals = []
+                        for h in rows:
+                            # Accept a few common column naming styles
+                            lat = h.get("lat") or h.get("latitude") or h.get("location_lat") or h.get("locationLatitude")
+                            lon = h.get("lon") or h.get("longitude") or h.get("location_lon") or h.get("locationLongitude")
+                            if lat is None or lon is None:
+                                continue
+                            hospitals.append({
+                                "id": str(h.get("id")),
+                                "name": h.get("name") or h.get("hospital_name") or "Hospital",
+                                "lat": float(lat),
+                                "lon": float(lon),
+                                "icu_beds": int(h.get("icu_beds") or h.get("icu_beds_available") or 0),
+                                "trauma": bool(h.get("trauma") if h.get("trauma") is not None else h.get("trauma_specialty") or False),
+                                "city": h.get("city"),
+                            })
+                        if hospitals:
+                            return {"hospitals": hospitals}
+            except Exception as _e:
+                logger.warning("Supabase hospitals fetch failed (%s), using fallback list", _e)
+
         if not db:
             return {"hospitals": MOCK_HOSPITALS_LIST}
         hospitals = db.query(HospitalDB).all()

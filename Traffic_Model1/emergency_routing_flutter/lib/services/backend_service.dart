@@ -156,7 +156,16 @@ class BackendService {
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return List<Map<String, dynamic>>.from(data['hospitals'] ?? []);
+        // Backend may return either:
+        // 1) { "hospitals": [...] }
+        // 2) [ ... ]  (raw list)
+        if (data is List) {
+          return List<Map<String, dynamic>>.from(data);
+        }
+        if (data is Map) {
+          return List<Map<String, dynamic>>.from(data['hospitals'] ?? []);
+        }
+        return [];
       } else {
         throw Exception('Failed to fetch hospitals: ${response.body}');
       }
@@ -434,7 +443,13 @@ class BackendService {
       final supabaseUrl = 'https://uhlnwyrikuiprkuubloh.supabase.co';
       final supabaseKey = 'sb_publishable_3AB7L_OofX-B7hlO7mWUrA_vrSq5cBO';
       
-      final url = Uri.parse('$supabaseUrl/rest/v1/posts?dispatch_status=in.(pending,assigned,in-progress)&order=created_at.desc');
+      // Join hospitals table to get destination hospital coordinates
+      final url = Uri.parse(
+        '$supabaseUrl/rest/v1/posts'
+        '?select=*,destination_hospital:hospitals!destination_hospital_id(id,name,latitude,longitude)'
+        '&dispatch_status=in.(pending,assigned,in-progress)'
+        '&order=created_at.desc'
+      );
       final response = await http.get(
         url,
         headers: {
@@ -449,31 +464,86 @@ class BackendService {
         
         return posts.map((post) {
            final location = post['location'];
+
+           // ── ORIGIN: prefer ML-inferred coordinates over raw GPS ──
            double lat = 22.7196; // Default Indore
            double lon = 75.8577;
            
            if (post['inferred_latitude'] != null && post['inferred_longitude'] != null) {
+              // 1st priority: ML-extracted location from authority dashboard
               lat = double.tryParse(post['inferred_latitude'].toString()) ?? lat;
               lon = double.tryParse(post['inferred_longitude'].toString()) ?? lon;
+           } else if (post['latitude'] != null && post['longitude'] != null) {
+              // 2nd priority: raw GPS from citizen
+              lat = double.tryParse(post['latitude'].toString()) ?? lat;
+              lon = double.tryParse(post['longitude'].toString()) ?? lon;
+           } else if (location is List && location.length >= 2) {
+              lat = double.tryParse(location[0].toString()) ?? lat;
+              lon = double.tryParse(location[1].toString()) ?? lon;
            } else if (location is Map && location['lat'] != null) {
               lat = double.tryParse(location['lat'].toString()) ?? lat;
               lon = double.tryParse(location['lon'].toString()) ?? lon;
-           } else if (location is Map && location['latitude'] != null) {
-              lat = double.tryParse(location['latitude'].toString()) ?? lat;
-              lon = double.tryParse(location['longitude'].toString()) ?? lon;
+           } else if (location is String && location.contains(',')) {
+              final parts = location.split(',');
+              if (parts.length >= 2) {
+                lat = double.tryParse(parts[0].trim()) ?? lat;
+                lon = double.tryParse(parts[1].trim()) ?? lon;
+              }
+           }
+
+           // If we still have the default Indore fallback, infer city from text fields
+           // so we don't always route inside Indore when ML/GPS is missing.
+           final isDefaultIndore = (lat - 22.7196).abs() < 0.0001 && (lon - 75.8577).abs() < 0.0001;
+           if (isDefaultIndore) {
+             final extracted = post['extracted_locations'];
+             final parts = <String>[
+               if (post['caption'] != null) post['caption'].toString(),
+               if (post['location'] != null) post['location'].toString(),
+               if (extracted is List && extracted.isNotEmpty) extracted.first.toString(),
+             ];
+             final blob = parts.join(' ').toLowerCase();
+             if (blob.contains('bengaluru') || blob.contains('bangalore')) {
+               lat = 12.9716;
+               lon = 77.5946;
+             } else if (blob.contains('chennai')) {
+               lat = 13.0827;
+               lon = 80.2707;
+             } else if (blob.contains('indore')) {
+               lat = 22.7196;
+               lon = 75.8577;
+             }
+           }
+
+           // ── DESTINATION: use assigned hospital coordinates ──
+           double destLat = 22.7533; // Default hospital fallback
+           double destLon = 75.8937;
+           String destHospitalName = 'Nearest Hospital';
+
+           final hospital = post['destination_hospital'];
+           if (hospital is Map && hospital['latitude'] != null && hospital['longitude'] != null) {
+             final hLat = double.tryParse(hospital['latitude'].toString());
+             final hLon = double.tryParse(hospital['longitude'].toString());
+             if (hLat != null && hLon != null) {
+               destLat = hLat;
+               destLon = hLon;
+             }
+             if (hospital['name'] != null) {
+               destHospitalName = hospital['name'].toString();
+             }
            }
            
-           int severity = int.tryParse(post['severity']?.toString() ?? '5') ?? 5;
-           String priority = severity >= 7 ? 'High' : 'Medium';
+           // ── METADATA ──
+           final urgencyScore = post['urgency_score'];
+           int severity = urgencyScore != null ? (urgencyScore is int ? urgencyScore : int.tryParse(urgencyScore.toString()) ?? 5) : 5;
+           String priority = severity >= 7 ? 'High' : severity >= 4 ? 'Medium' : 'Low';
            
            String incidentType = post['disaster_type']?.toString() ?? 'Emergency';
-           if (post['ai_analysis'] is Map && post['ai_analysis']['disaster_type'] != null) {
-               incidentType = post['ai_analysis']['disaster_type'];
-           }
            
            String locLabel = 'Disaster Location';
            if (post['extracted_locations'] is List && (post['extracted_locations'] as List).isNotEmpty) {
                locLabel = post['extracted_locations'][0].toString();
+           } else if (post['location'] is String && (post['location'] as String).isNotEmpty) {
+               locLabel = post['location'].toString();
            }
            
            return {
@@ -481,9 +551,9 @@ class BackendService {
              "type": incidentType,
              "priority": priority,
              "originCoord": {"latitude": lat, "longitude": lon},
-             "destCoord": {"latitude": 22.7533, "longitude": 75.8937},
+             "destCoord": {"latitude": destLat, "longitude": destLon},
              "originLabel": locLabel,
-             "destLabel": "Nearest Hospital",
+             "destLabel": destHospitalName,
              "timestamp": post['created_at'] ?? DateTime.now().toIso8601String(),
              "callerInfo": "Citizen Report",
              "witnessReports": [],
@@ -491,7 +561,7 @@ class BackendService {
              "videoFeedUrl": post['image_url'],
              "ambulanceEtaMin": 10,
              "patientCondition": "Unknown",
-             "assignedHospital": post['assigned_team'],
+             "assignedHospital": destHospitalName,
            };
         }).toList();
       }
