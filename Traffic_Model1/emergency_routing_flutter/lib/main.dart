@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/theme.dart';
-import 'screens/landing_screen.dart'; // import the new landing screen
+import 'screens/authority_landing_redirect_screen.dart';
 import 'screens/main_shell.dart';
 
 const String _supabaseUrl = String.fromEnvironment(
@@ -46,7 +46,7 @@ class EmergencyRoutingApp extends ConsumerWidget {
       theme: buildAppTheme(),
       home: dispatchRequested
           ? MainShell(initialTab: initialTab)
-          : const LandingScreen(),
+          : const AuthorityLandingRedirectScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

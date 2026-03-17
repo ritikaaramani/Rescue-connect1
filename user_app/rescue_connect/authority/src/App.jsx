@@ -19,6 +19,18 @@ export default function App() {
 
     async function init() {
       const { data } = await supabase.auth.getSession()
+      const autoLoginRequested = new URLSearchParams(window.location.search).get('autologin') === '1'
+
+      if (!data?.session?.user && autoLoginRequested) {
+        const { data: authData, error } = await supabase.auth.signInAnonymously()
+        if (error) {
+          console.error('Auto-login failed', error)
+        }
+        if (!mounted) return
+        setUser(authData?.user ?? null)
+        return
+      }
+
       if (!mounted) return
       setUser(data?.session?.user ?? null)
     }
@@ -54,6 +66,59 @@ export default function App() {
   async function signOut() {
     await supabase.auth.signOut()
     setUser(null)
+  }
+
+  function getFlutterCandidates() {
+    const configuredFlutterUrl = import.meta.env.VITE_FLUTTER_WEB_URL
+    return [
+      configuredFlutterUrl,
+      'http://localhost:8080',
+      'http://localhost:5175',
+      'http://localhost:3000'
+    ].filter(Boolean)
+  }
+
+  async function pickReachableFlutterUrl() {
+    const flutterCandidates = getFlutterCandidates()
+
+    for (const baseUrl of flutterCandidates) {
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 1200)
+        await fetch(baseUrl, {
+          method: 'GET',
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+        return baseUrl
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    return flutterCandidates[0]
+  }
+
+  async function openRescueTeamApp() {
+    const popup = window.open('about:blank', '_blank')
+
+    try {
+      const flutterBaseUrl = await pickReachableFlutterUrl()
+      const redirectUrl = new URL(flutterBaseUrl)
+      redirectUrl.searchParams.set('open', 'incoming')
+
+      if (popup && !popup.closed) {
+        popup.location.href = redirectUrl.toString()
+      } else {
+        window.open(redirectUrl.toString(), '_blank')
+      }
+    } catch (e) {
+      if (popup && !popup.closed) popup.close()
+      console.error('Open rescue team app error:', e)
+      alert('Failed to open rescue team app: ' + e.message)
+    }
   }
 
   // Login screen with landing page
@@ -129,11 +194,14 @@ export default function App() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
                   </button>
-                  <button className="px-8 py-5 text-white font-semibold hover:bg-white/10 rounded-full transition-all flex items-center justify-center gap-2">
+                  <button
+                    onClick={openRescueTeamApp}
+                    className="px-8 py-5 text-white font-semibold hover:bg-white/10 rounded-full transition-all flex items-center justify-center gap-2"
+                  >
                     <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                      <path fillRule="evenodd" d="M4 4a1 1 0 011-1h10a1 1 0 011 1v12a1 1 0 11-2 0V8.414l-8.293 8.293a1 1 0 01-1.414-1.414L12.586 7H5a1 1 0 01-1-1V4z" clipRule="evenodd" />
                     </svg>
-                    Watch Demo
+                    Login as Rescue Team
                   </button>
                 </div>
               </div>
@@ -396,15 +464,26 @@ export default function App() {
               Whether you're a government official, NDRF personnel, or emergency responder — 
               join the platform that's transforming disaster response.
             </p>
-            <button
-              onClick={signIn}
-              className="group px-12 py-6 bg-white text-gray-900 rounded-full font-bold text-xl hover:bg-gray-100 transition-all shadow-2xl inline-flex items-center gap-4"
-            >
-              <span>Enter Command Center</span>
-              <svg className="w-6 h-6 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-              </svg>
-            </button>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <button
+                onClick={signIn}
+                className="group px-12 py-6 bg-white text-gray-900 rounded-full font-bold text-xl hover:bg-gray-100 transition-all shadow-2xl inline-flex items-center gap-4"
+              >
+                <span>Enter Command Center</span>
+                <svg className="w-6 h-6 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+              </button>
+              <button
+                onClick={openRescueTeamApp}
+                className="px-10 py-6 border border-white/30 text-white rounded-full font-bold text-xl hover:bg-white/10 transition-all inline-flex items-center gap-3"
+              >
+                <span>Login as Rescue Team</span>
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4 4a1 1 0 011-1h10a1 1 0 011 1v12a1 1 0 11-2 0V8.414l-8.293 8.293a1 1 0 01-1.414-1.414L12.586 7H5a1 1 0 01-1-1V4z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
