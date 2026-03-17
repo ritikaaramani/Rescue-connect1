@@ -168,11 +168,6 @@ class LandingScreen extends StatelessWidget {
                     Row(
                       children: [
                         _buildLoginButton(
-                          title: 'Login as Reporter',
-                          onTap: () => _launchURL('http://localhost:5173'),
-                        ),
-                        const SizedBox(width: 16),
-                        _buildLoginButton(
                           title: 'Login as Authority/Dispatcher',
                           onTap: () => _launchURL('http://localhost:5174'),
                         ),
