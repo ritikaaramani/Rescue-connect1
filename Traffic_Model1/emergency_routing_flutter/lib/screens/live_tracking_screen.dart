@@ -124,9 +124,24 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
     // Listen to blockage alerts
     _blockageAlertsSub = backend.blockageAlerts.listen((data) {
       if (!mounted) return;
+      final bLat = _asDouble(data['lat'] ?? data['latitude']);
+      final bLon = _asDouble(data['lon'] ?? data['longitude']);
       setState(() {
         _hasBlockage = true;
         _activeBlockages.add(data);
+        if (bLat != null && bLon != null) {
+          final candidate = LatLng(bLat, bLon);
+          // Prefer the closest blockage to current vehicle position as our avoid target.
+          if (_vehiclePos == null) {
+            _blockagePoint = candidate;
+          } else {
+            final dNew = const Distance().as(LengthUnit.Meter, _vehiclePos!, candidate);
+            final dOld = _blockagePoint == null
+                ? double.infinity
+                : const Distance().as(LengthUnit.Meter, _vehiclePos!, _blockagePoint!);
+            if (dNew < dOld) _blockagePoint = candidate;
+          }
+        }
       });
       
       // Auto-trigger rerouting on blockage
@@ -171,6 +186,98 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
 
   // ── Fetch route from OSRM ─────────────────────────────────────────────
 
+  static const double _avoidRadiusM = 350; // keep route outside this radius
+
+  double? _asDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
+  double _asSeverity(dynamic v) {
+    if (v == null) return 0.5;
+    if (v is num) return v.toDouble().clamp(0.0, 1.0);
+    if (v is String) {
+      final s = v.toLowerCase().trim();
+      if (s == 'low') return 0.25;
+      if (s == 'medium' || s == 'med') return 0.6;
+      if (s == 'high') return 0.9;
+      final p = double.tryParse(s);
+      if (p != null) return p.clamp(0.0, 1.0);
+    }
+    return 0.5;
+  }
+
+  bool _routeHitsBlockage(List<LatLng> pts, LatLng center, {double radiusM = _avoidRadiusM}) {
+    if (pts.isEmpty) return false;
+    const dist = Distance();
+    for (final p in pts) {
+      if (dist.as(LengthUnit.Meter, p, center) < radiusM) return true;
+    }
+    return false;
+  }
+
+  bool _routeDiffersMeaningfully(List<LatLng> a, List<LatLng> b, {double minDeviationM = 120}) {
+    if (a.isEmpty || b.isEmpty) return true;
+    const dist = Distance();
+    const samples = 14;
+    double maxMin = 0;
+    for (int i = 0; i < samples; i++) {
+      final idx = ((i / (samples - 1)) * (b.length - 1)).round().clamp(0, b.length - 1);
+      final p = b[idx];
+      double best = double.infinity;
+      final step = (a.length / 60).ceil().clamp(1, 50);
+      for (int j = 0; j < a.length; j += step) {
+        final d = dist.as(LengthUnit.Meter, p, a[j]);
+        if (d < best) best = d;
+        if (best < 20) break;
+      }
+      if (best > maxMin) maxMin = best;
+    }
+    return maxMin >= minDeviationM;
+  }
+
+  // Move [origin] by [eastM] meters east and [northM] meters north.
+  LatLng _offsetMeters(LatLng origin, {required double eastM, required double northM}) {
+    final latRad = origin.latitude * pi / 180.0;
+    final dLat = northM / 111320.0;
+    final dLon = eastM / (111320.0 * cos(latRad).abs().clamp(0.15, 1.0));
+    return LatLng(origin.latitude + dLat, origin.longitude + dLon);
+  }
+
+  /// Compute two candidate detour waypoints around [avoid]:
+  /// left/right of the current travel direction (from -> to).
+  List<LatLng> _detourCandidates({
+    required LatLng from,
+    required LatLng to,
+    required LatLng avoid,
+    required double offsetM,
+  }) {
+    // Direction vector in meters (approx) at avoid latitude
+    final dx = (to.longitude - from.longitude) * 111320.0 * cos(avoid.latitude * pi / 180.0);
+    final dy = (to.latitude - from.latitude) * 111320.0;
+    final len = sqrt(dx * dx + dy * dy);
+    if (len < 1) {
+      // Fallback: arbitrary perpendicular
+      return [
+        _offsetMeters(avoid, eastM: offsetM, northM: 0),
+        _offsetMeters(avoid, eastM: -offsetM, northM: 0),
+      ];
+    }
+    // Perpendicular unit vectors (left/right)
+    final ux = dx / len;
+    final uy = dy / len;
+    final leftEast = -uy * offsetM;
+    final leftNorth = ux * offsetM;
+    final rightEast = uy * offsetM;
+    final rightNorth = -ux * offsetM;
+    return [
+      _offsetMeters(avoid, eastM: leftEast, northM: leftNorth),
+      _offsetMeters(avoid, eastM: rightEast, northM: rightNorth),
+    ];
+  }
+
   Future<void> _fetchRoute(LatLng from, LatLng to,
       {bool isReroute = false, LatLng? avoid}) async {
     setState(() {
@@ -180,50 +287,71 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
     });
 
     try {
-      // Build waypoints, adding a mid-point offset if rerouting to get a different path
-      String coordStr;
-      if (isReroute && avoid != null) {
-        // Create a waypoint that's offset from the blockage to force a different route
-        final offsetLat = avoid.latitude + 0.008 * (Random().nextBool() ? 1 : -1);
-        final offsetLng = avoid.longitude + 0.008 * (Random().nextBool() ? 1 : -1);
-        coordStr =
-            '${from.longitude},${from.latitude};'
-            '$offsetLng,$offsetLat;'
-            '${to.longitude},${to.latitude}';
-      } else {
-        coordStr =
-            '${from.longitude},${from.latitude};'
-            '${to.longitude},${to.latitude}';
+      // Build route. If rerouting, try detours until the resulting polyline
+      // is OUTSIDE the blockage radius (so we don't "go through" it).
+      List<LatLng> bestPoints = [];
+      double bestDistKm = 0;
+      double bestDurMin = 0;
+
+      Future<void> tryOsrm(List<LatLng> waypoints) async {
+        final coordStr = waypoints
+            .map((p) => '${p.longitude},${p.latitude}')
+            .join(';');
+        final url =
+            'http://router.project-osrm.org/route/v1/driving/$coordStr?geometries=geojson&overview=full';
+        final res = await _dio.get(url);
+        if (res.data['code'] != 'Ok') throw Exception('No route found');
+        final route = res.data['routes'][0];
+        final coords = route['geometry']['coordinates'] as List;
+        final distKm = (route['distance'] as num) / 1000;
+        final durMin = (route['duration'] as num) / 60;
+        final points =
+            coords.map((c) => LatLng(c[1] as double, c[0] as double)).toList();
+
+        bestPoints = points;
+        bestDistKm = distKm;
+        bestDurMin = durMin;
       }
 
-      final url =
-          'http://router.project-osrm.org/route/v1/driving/$coordStr?geometries=geojson&overview=full';
-      final res = await _dio.get(url);
+      if (isReroute && avoid != null) {
+        // Attempt increasingly wide detours around the blockage.
+        // We try left/right perpendicular detours at offsets 800m..3000m.
+        final offsets = [900.0, 1300.0, 1800.0, 2400.0, 3200.0, 4200.0];
+        bool found = false;
+        for (final off in offsets) {
+          final candidates = _detourCandidates(from: from, to: to, avoid: avoid, offsetM: off);
+          for (final mid in candidates) {
+            await tryOsrm([from, mid, to]);
+            final avoids = !_routeHitsBlockage(bestPoints, avoid);
+            final differs = _routeDiffersMeaningfully(_originalRoute.isNotEmpty ? _originalRoute : bestPoints, bestPoints);
+            if (avoids && differs) {
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
 
-      if (res.data['code'] != 'Ok') throw Exception('No route found');
-
-      final route = res.data['routes'][0];
-      final coords = route['geometry']['coordinates'] as List;
-      final distKm = (route['distance'] as num) / 1000;
-      final durMin = (route['duration'] as num) / 60;
-
-      final points =
-          coords.map((c) => LatLng(c[1] as double, c[0] as double)).toList();
+        // If everything still intersects, keep the shortest route we got
+        // but at least we tried to push it away deterministically.
+      } else {
+        await tryOsrm([from, to]);
+      }
 
       setState(() {
         if (!isReroute) {
-          _originalRoute = List.from(points);
+          _originalRoute = List.from(bestPoints);
         }
-        _routePoints = points;
-        _routeDistKm = distKm;
-        _routeDurMin = durMin;
-        _etaMin = durMin;
+        _routePoints = bestPoints;
+        _routeDistKm = bestDistKm;
+        _routeDurMin = bestDurMin;
+        _etaMin = bestDurMin;
         _vehicleIdx = 0;
-        _vehiclePos = points.first;
+        _vehiclePos = bestPoints.isNotEmpty ? bestPoints.first : from;
         _loading = false;
         _statusText = isReroute
-            ? 'REROUTED — new path active (${distKm.toStringAsFixed(1)} km)'
-            : 'Route locked — ${distKm.toStringAsFixed(1)} km';
+            ? 'REROUTED — detour applied (${bestDistKm.toStringAsFixed(1)} km)'
+            : 'Route locked — ${bestDistKm.toStringAsFixed(1)} km';
         if (isReroute) {
           _rerouted = true;
           _isRerouting = false;
@@ -298,15 +426,25 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
   void _simulateBlockage() {
     if (_routePoints.isEmpty || _hasBlockage) return;
 
-    // Place blockage at ~40% ahead of current vehicle position
-    final blockIdx =
-        min(_vehicleIdx + (_routePoints.length * 0.3).toInt(), _routePoints.length - 1);
+    // Place blockage *ahead* of the vehicle, not on top of it.
+    // We use a minimum hop count so it's always visually separated.
+    final minAheadPts = min(40, max(8, (_routePoints.length * 0.12).round()));
+    final targetAheadPts = max(minAheadPts, (_routePoints.length * 0.25).round());
+    int blockIdx = min(_vehicleIdx + targetAheadPts, _routePoints.length - 1);
+    if (blockIdx <= _vehicleIdx && _vehicleIdx < _routePoints.length - 1) {
+      blockIdx = _vehicleIdx + 1;
+    }
     setState(() {
       _blockagePoint = _routePoints[blockIdx];
       _hasBlockage = true;
       _statusText = '⚠ BLOCKAGE DETECTED AHEAD — preparing reroute...';
       _reliability = max(0.4, _reliability - 0.15);
     });
+
+    // Ensure the blockage is visible immediately.
+    try {
+      if (_blockagePoint != null) _map.move(_blockagePoint!, 14.5);
+    } catch (_) {}
 
     // Auto-reroute immediately when a blockage is simulated.
     Future.delayed(const Duration(milliseconds: 800), () {
@@ -319,6 +457,10 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
 
   void _triggerReroute() {
     if (_vehiclePos == null) return;
+    if (_blockagePoint == null) {
+      setState(() => _statusText = '⚠ Cannot reroute: no blockage location');
+      return;
+    }
     setState(() => _isRerouting = true);
 
     // Delay to show the "rerouting" animation
@@ -384,6 +526,21 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                   color: _rerouted ? kAiCyan : kEmergencyOrange,
                 ),
               ]),
+
+            // Blockage avoidance zone overlay (makes blockage obvious)
+            if (_hasBlockage && _blockagePoint != null)
+              CircleLayer(
+                circles: [
+                  CircleMarker(
+                    point: _blockagePoint!,
+                    radius: _avoidRadiusM,
+                    useRadiusInMeter: true,
+                    color: Colors.redAccent.withOpacity(0.18),
+                    borderStrokeWidth: 2,
+                    borderColor: Colors.redAccent.withOpacity(0.65),
+                  ),
+                ],
+              ),
             // Traversed path (green)
             if (_vehicleIdx > 1)
               PolylineLayer(polylines: [
@@ -479,9 +636,9 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
                 ),
               // Active blockages from backend
               ..._activeBlockages.map((blockage) {
-                final lat = (blockage['lat'] ?? 22.74).toDouble();
-                final lon = (blockage['lon'] ?? 75.89).toDouble();
-                final severity = (blockage['severity'] ?? 0.5).toDouble();
+                final lat = _asDouble(blockage['lat'] ?? blockage['latitude']) ?? 22.74;
+                final lon = _asDouble(blockage['lon'] ?? blockage['longitude']) ?? 75.89;
+                final severity = _asSeverity(blockage['severity']);
                 final bType = blockage['type'] ?? 'blockage';
                 
                 return Marker(
