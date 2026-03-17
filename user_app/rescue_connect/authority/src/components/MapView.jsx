@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap, Tooltip } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, Tooltip, Polyline } from 'react-leaflet'
 import MarkerClusterGroup from 'react-leaflet-cluster'
 import { supabase } from '../supabaseClient'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { Truck } from 'lucide-react'
+import { Truck, Navigation } from 'lucide-react'
 
 // Fix for default marker icons in React-Leaflet
 delete L.Icon.Default.prototype._getIconUrl
@@ -28,7 +28,8 @@ const icons = {
   urgent: createIcon('red'),
   verified: createIcon('orange'),
   pending: createIcon('yellow'),
-  default: createIcon('blue')
+  default: createIcon('blue'),
+  hospital: createIcon('green')
 }
 
 // Component to fit map bounds to markers
@@ -37,8 +38,13 @@ function FitBounds({ posts }) {
 
   useEffect(() => {
     if (posts.length > 0) {
-      const bounds = posts.map(p => [p.inferred_latitude, p.inferred_longitude])
-      map.fitBounds(bounds, { padding: [50, 50] })
+      const bounds = posts.map(p => [
+        p.inferred_latitude || p.latitude, 
+        p.inferred_longitude || p.longitude
+      ]).filter(coord => coord[0] && coord[1])
+      if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [50, 50] })
+      }
     }
   }, [posts, map])
 
@@ -50,8 +56,12 @@ function CenterOnPost({ post }) {
   const map = useMap()
 
   useEffect(() => {
-    if (post && post.inferred_latitude && post.inferred_longitude) {
-      map.setView([post.inferred_latitude, post.inferred_longitude], 15)
+    if (post) {
+      const lat = post.inferred_latitude || post.latitude
+      const lng = post.inferred_longitude || post.longitude
+      if (lat && lng) {
+        map.setView([lat, lng], 15)
+      }
     }
   }, [post, map])
 
@@ -121,14 +131,20 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
     try {
       let query = supabase
         .from('posts')
-        .select('*')
-        .not('inferred_latitude', 'is', null)
-        .not('inferred_longitude', 'is', null)
+        .select(`
+            *,
+            destination_hospital:hospitals(id, name, latitude, longitude),
+            assigned_vehicle:vehicles(id, type, plate_number)
+        `)
+        .or('and(inferred_latitude.not.is.null,inferred_longitude.not.is.null),and(latitude.not.is.null,longitude.not.is.null)')
         .order('created_at', { ascending: false })
 
       // Apply status filter
       if (filter !== 'all') {
         query = query.eq('status', filter)
+      } else {
+        // Exclude rejected posts by default unless specifically asked for
+        query = query.neq('status', 'rejected')
       }
 
       const { data, error } = await query.limit(100)
@@ -173,10 +189,10 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <div>
                 <p className="text-white font-semibold text-lg">
-                  📍 {selectedPost.disaster_type || 'Disaster'} - {selectedPost.extracted_locations?.[0] || 'Location'}
+                  📍 {selectedPost.disaster_type || 'Disaster'} - {selectedPost.extracted_locations?.[0] || selectedPost.location || 'Location'}
                 </p>
                 <p className="text-gray-300 text-sm">
-                  Coordinates: ({selectedPost.inferred_latitude?.toFixed(4)}, {selectedPost.inferred_longitude?.toFixed(4)})
+                  Coordinates: ({(selectedPost.inferred_latitude || selectedPost.latitude)?.toFixed(4)}, {(selectedPost.inferred_longitude || selectedPost.longitude)?.toFixed(4)})
                 </p>
               </div>
             </div>
@@ -236,7 +252,7 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
       {/* Map container */}
       <div className="flex-1 rounded-xl overflow-hidden border border-gray-700" style={{ minHeight: '500px' }}>
         <MapContainer
-          center={selectedPost ? [selectedPost.inferred_latitude, selectedPost.inferred_longitude] : defaultCenter}
+          center={selectedPost ? [selectedPost.inferred_latitude || selectedPost.latitude, selectedPost.inferred_longitude || selectedPost.longitude] : defaultCenter}
           zoom={selectedPost ? 15 : defaultZoom}
           style={{ height: '100%', width: '100%' }}
         >
@@ -251,15 +267,66 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
           {/* Fit bounds only if no selected post */}
           {!selectedPost && posts.length > 0 && <FitBounds posts={posts} />}
 
+          {/* Render dispatch routes and hospital markers first so they are under the main clusters */}
+          {posts.map(post => {
+            const hasHospital = post.destination_hospital && post.destination_hospital.latitude && post.destination_hospital.longitude
+            const lat = post.inferred_latitude || post.latitude
+            const lng = post.inferred_longitude || post.longitude
+            
+            if (!hasHospital || !lat || !lng || post.dispatch_status === 'resolved') return null
+
+            const hospitalLat = post.destination_hospital.latitude
+            const hospitalLng = post.destination_hospital.longitude
+
+            return (
+              <div key={`route-${post.id}`}>
+                {/* Route Line */}
+                <Polyline 
+                  positions={[[lat, lng], [hospitalLat, hospitalLng]]} 
+                  pathOptions={{ color: '#3b82f6', weight: 3, dashArray: '10, 10' }} 
+                />
+                
+                {/* Hospital Marker */}
+                <Marker 
+                  position={[hospitalLat, hospitalLng]} 
+                  icon={icons.hospital}
+                >
+                  <Tooltip direction="top" offset={[0, -35]}>
+                    <div className="text-xs font-medium text-center">
+                      🏥 {post.destination_hospital.name}
+                    </div>
+                  </Tooltip>
+                  <Popup>
+                    <div className="p-2">
+                      <h3 className="font-bold text-gray-800 border-b pb-1 mb-2">🏥 {post.destination_hospital.name}</h3>
+                      <p className="text-xs text-gray-600 mb-1">
+                        <b>Target for:</b> {post.disaster_type} Incident
+                      </p>
+                      {post.assigned_vehicle && (
+                        <p className="text-xs text-gray-600">
+                          <b>Assigned Unit:</b> {post.assigned_vehicle.type.replace('_', ' ').toUpperCase()} ({post.assigned_vehicle.plate_number})
+                        </p>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              </div>
+            )
+          })}
+
           <MarkerClusterGroup chunkedLoading>
             {posts.map(post => {
               const needs = extractNeeds(post)
               const isSelected = selectedPost && selectedPost.id === post.id
+              const lat = post.inferred_latitude || post.latitude
+              const lng = post.inferred_longitude || post.longitude
+              
+              if (!lat || !lng) return null;
               
               return (
               <Marker
                 key={post.id}
-                position={[post.inferred_latitude, post.inferred_longitude]}
+                position={[lat, lng]}
                 icon={getIcon(post.status)}
               >
                 {/* Permanent tooltip above marker showing needs */}
@@ -330,13 +397,32 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
                       </p>
                     )}
 
+                    {/* Dispatch Sub-section */}
+                    {(post.destination_hospital || post.assigned_vehicle) && post.dispatch_status !== 'resolved' && (
+                      <div className="mt-2 mb-2 p-2 bg-blue-50 rounded-lg border border-blue-200">
+                        <p className="font-bold text-blue-800 text-xs mb-1 flex items-center gap-1">
+                          <Navigation className="w-3 h-3" /> Active Dispatch
+                        </p>
+                        {post.assigned_vehicle && (
+                          <p className="text-xs text-blue-900 mb-1">
+                            <b>Unit:</b> {post.assigned_vehicle.type.replace('_', ' ').toUpperCase()} ({post.assigned_vehicle.plate_number})
+                          </p>
+                        )}
+                        {post.destination_hospital && (
+                          <p className="text-xs text-blue-900">
+                            <b>Dest:</b> {post.destination_hospital.name}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Timestamp */}
                     <p className="text-xs text-gray-400 mb-2">
                       {formatDate(post.created_at)}
                     </p>
 
                     <a
-                      href={`https://www.google.com/maps?q=${post.inferred_latitude},${post.inferred_longitude}`}
+                      href={`https://www.google.com/maps?q=${lat},${lng}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block w-full text-center py-1.5 px-3 bg-blue-600 hover:bg-blue-700 !text-white text-xs font-medium rounded transition-colors"
@@ -365,6 +451,12 @@ export default function MapView({ selectedPost, onClearSelection, onDispatchTeam
         </div>
         <div className="flex items-center gap-1">
           <span className="w-3 h-3 rounded-full bg-blue-500"></span> Other
+        </div>
+        <div className="flex items-center gap-1 ml-4 border-l pl-4 border-gray-600">
+          <span className="w-3 h-3 rounded-full bg-green-500"></span> Assigned Hospital
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-6 h-0.5 border-t-2 border-dashed border-blue-500 line-block"></span> Dispatch Route
         </div>
       </div>
     </div>

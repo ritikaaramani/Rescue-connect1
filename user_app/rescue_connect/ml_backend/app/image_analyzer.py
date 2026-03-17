@@ -80,6 +80,7 @@ You MUST respond with ONLY valid JSON (no markdown, no explanation, no code bloc
     "description": "Brief description of what you see",
     "detected_elements": ["element1", "element2"],
     "location_hints": ["visually identified location name", "landmarks", "text on signs"],
+    "visible_text": "any readable text found in the image (signboards, shop names, street signs)",
     "people_affected": "none" or "few" or "many" or "crowd",
     "urgency_score": 1-10
 }
@@ -181,49 +182,95 @@ CRITICAL FOR LOCATION:
 
     async def _analyze_with_gemini(self, image_url: str) -> dict:
         """Analyze image using Google Gemini."""
-        from google import genai
-        from google.genai import types
-        
-        client = genai.Client(
-            api_key=self.gemini_key,
-            http_options={'api_version': 'v1'}
-        )
-        
+        # Use the Generative Language REST API directly to avoid SDK/model-version
+        # mismatches (we've seen 404s for older model ids via some SDK paths).
+        #
+        # This matches the frontend's working pattern:
+        #   /v1beta/models/<model>:generateContent
+
+        # Allow override via env for quick hotfixes without code changes
+        preferred_model = os.getenv("GEMINI_MODEL", "").strip()
         models_to_try = [
-            'gemini-2.5-flash',
-            'gemini-2.0-flash', 
-            'gemini-1.5-flash'
+            preferred_model,
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-latest",
         ]
+        models_to_try = [m for m in models_to_try if m]
+
         last_error = None
-        
-        for model_name in models_to_try:
+
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            # Download image once
             try:
-                print(f"[INFO] Trying model: {model_name}")
-                
-                async with httpx.AsyncClient() as http_client:
-                    response = await http_client.get(image_url)
-                    image_data = response.content
-                
-                image_part = types.Part.from_bytes(
-                    data=image_data,
-                    mime_type="image/jpeg"
-                )
-                
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[self._get_prompt(), image_part]
-                )
-                content = response.text
-                
-                print(f"[INFO] Gemini response: {content[:200]}...")
-                
-                return self._parse_json_response(content)
-                    
+                img_res = await client.get(image_url)
+                img_res.raise_for_status()
+                image_bytes = img_res.content
             except Exception as e:
-                print(f"[WARN] Model {model_name} failed: {e}")
-                last_error = e
-                continue
-        
+                return self._default_response(f"Gemini error: could not download image ({type(e).__name__}: {e})")
+
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            for model_name in models_to_try:
+                try:
+                    print(f"[INFO] Trying Gemini model: {model_name}")
+
+                    url = (
+                        "https://generativelanguage.googleapis.com/v1beta/models/"
+                        f"{model_name}:generateContent?key={self.gemini_key}"
+                    )
+                    payload = {
+                        "contents": [
+                            {
+                                "parts": [
+                                    {"text": self._get_prompt()},
+                                    {
+                                        "inline_data": {
+                                            "mime_type": "image/jpeg",
+                                            "data": image_b64,
+                                        }
+                                    },
+                                ]
+                            }
+                        ],
+                        "generationConfig": {
+                            "temperature": 0.1,
+                            "maxOutputTokens": 1000,
+                        },
+                    }
+
+                    res = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+                    if not res.ok:
+                        # Preserve the real server message; model 404s are common.
+                        try:
+                            err_json = res.json()
+                        except Exception:
+                            err_json = {"error": {"message": res.text[:500]}}
+                        last_error = f"{res.status_code} {err_json}"
+                        print(f"[WARN] Gemini model {model_name} failed: {last_error}")
+                        continue
+
+                    data = res.json()
+                    content = (
+                        data.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "")
+                    )
+                    if not content:
+                        last_error = f"Empty response from {model_name}: {str(data)[:300]}"
+                        print(f"[WARN] Gemini model {model_name} returned empty text")
+                        continue
+
+                    print(f"[INFO] Gemini response: {content[:200]}...")
+                    return self._parse_json_response(content)
+
+                except Exception as e:
+                    last_error = f"{type(e).__name__}: {e}"
+                    print(f"[WARN] Gemini model {model_name} exception: {last_error}")
+                    continue
+
         print("[ERROR] All Gemini models failed")
         return self._default_response(f"Gemini error: {str(last_error)}")
 

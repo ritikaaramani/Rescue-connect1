@@ -53,6 +53,9 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
   int _vehicleIdx = 0;
   LatLng? _vehiclePos;
   Timer? _moveTimer;
+  // Simulation tuning: how much faster than real-time to animate.
+  // 1.0 = real-time; higher = faster. Keep this low for believable tracking.
+  static const double _simSpeedup = 4.0;
 
   // State
   bool _loading = true;
@@ -243,8 +246,17 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
 
   void _startVehicleAnimation() {
     _moveTimer?.cancel();
-    // Move every 300ms, skip 2-3 points at a time for smooth but visible movement
-    _moveTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
+
+    // Drive the animation off OSRM's ETA so the vehicle doesn't "teleport".
+    // We clamp to keep the UI responsive on extremely long/short routes.
+    int tickMs = 900;
+    if (_routeDurMin > 0 && _routePoints.length > 1) {
+      final totalMs = (_routeDurMin * 60 * 1000 / _simSpeedup);
+      tickMs = (totalMs / (_routePoints.length - 1)).round();
+      tickMs = tickMs.clamp(250, 1400);
+    }
+
+    _moveTimer = Timer.periodic(Duration(milliseconds: tickMs), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -255,8 +267,9 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
         return;
       }
 
-      final step = _routePoints.length > 200 ? 3 : (_routePoints.length > 80 ? 2 : 1);
-      _vehicleIdx = min(_vehicleIdx + step, _routePoints.length - 1);
+      // Move one polyline point at a time for realistic tracking.
+      // (If you want to speed up, adjust _simSpeedup rather than skipping points.)
+      _vehicleIdx = min(_vehicleIdx + 1, _routePoints.length - 1);
 
       setState(() {
         _vehiclePos = _routePoints[_vehicleIdx];
@@ -293,6 +306,14 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen>
       _hasBlockage = true;
       _statusText = '⚠ BLOCKAGE DETECTED AHEAD — preparing reroute...';
       _reliability = max(0.4, _reliability - 0.15);
+    });
+
+    // Auto-reroute immediately when a blockage is simulated.
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (!mounted) return;
+      if (_hasBlockage && !_rerouted) {
+        _triggerReroute();
+      }
     });
   }
 

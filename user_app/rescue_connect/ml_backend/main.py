@@ -387,19 +387,25 @@ async def process_full_pipeline(request: ProcessPostRequest):
             })
         }
         
+    except HTTPException:
+        # Preserve explicit API errors (404 post not found, etc.)
+        raise
     except Exception as e:
         import traceback
         import sys
-        error_msg = f"{type(e).__name__}: {str(e)[:200]}"
+        error_msg = f"{type(e).__name__}: {str(e)[:500]}"
         tb_str = traceback.format_exc()
         print(f"[ERROR] /process-full failed:\n{tb_str}", file=sys.stderr)
-        return {"success": False, "error": error_msg}
+        # Return a non-200 so the frontend button shows a real error instead of silently refreshing.
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 class DispatchUpdateRequest(BaseModel):
     post_id: str
     dispatch_status: str  # pending, assigned, in-progress, resolved
     assigned_team: Optional[str] = None
+    assigned_vehicle_id: Optional[str] = None
+    destination_hospital_id: Optional[str] = None
     resolution_notes: Optional[str] = None
 
 # Valid status transitions
@@ -443,6 +449,10 @@ async def update_dispatch(request: DispatchUpdateRequest):
         # Optional fields
         if request.assigned_team is not None:
             data["assigned_team"] = request.assigned_team
+        if request.assigned_vehicle_id is not None:
+            data["assigned_vehicle_id"] = request.assigned_vehicle_id
+        if request.destination_hospital_id is not None:
+            data["destination_hospital_id"] = request.destination_hospital_id
         if request.resolution_notes is not None:
             data["resolution_notes"] = request.resolution_notes
             

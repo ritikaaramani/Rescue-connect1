@@ -124,12 +124,14 @@ export const mlApi = {
   /**
    * Update dispatch status and assigned team
    */
-  async updateDispatch(postId, dispatchStatus, assignedTeam, resolutionNotes = null) {
+  async updateDispatch(postId, dispatchStatus, assignedTeam, vehicleId = null, hospitalId = null, resolutionNotes = null) {
     const body = {
       post_id: postId,
       dispatch_status: dispatchStatus,
-      assigned_team: assignedTeam
+      assigned_team: assignedTeam || 'Unassigned'
     }
+    if (vehicleId) body.assigned_vehicle_id = vehicleId
+    if (hospitalId) body.destination_hospital_id = hospitalId
     if (resolutionNotes !== null) {
       body.resolution_notes = resolutionNotes
     }

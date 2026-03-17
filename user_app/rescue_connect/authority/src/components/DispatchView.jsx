@@ -18,8 +18,24 @@ const STATUS_COLORS = {
     resolved: 'bg-green-100 text-green-800'
 }
 
+// Helper for Distance Calculation (Haversine Formula)
+function getDistance(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+    const R = 6371; // Radius of the earth in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in km
+}
+
 export default function DispatchView({ selectedPost, onClearSelection }) {
     const [posts, setPosts] = useState([])
+    const [vehicles, setVehicles] = useState([])
+    const [hospitals, setHospitals] = useState([])
     const [loading, setLoading] = useState(false)
     const [edits, setEdits] = useState({})
     const [resolveModal, setResolveModal] = useState(null) // Post being resolved
@@ -31,7 +47,26 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
 
     useEffect(() => {
         fetchDispatchablePosts()
+        fetchVehiclesAndHospitals()
     }, [])
+
+    async function fetchVehiclesAndHospitals() {
+        try {
+            const [vehiclesRes, hospitalsRes] = await Promise.all([
+                supabase.from('vehicles').select('*').order('type'),
+                supabase.from('hospitals').select('*').order('name')
+            ])
+            const fetchedVehicles = vehiclesRes.data || []
+            const fetchedHospitals = hospitalsRes.data || []
+            
+            setVehicles(fetchedVehicles)
+            setHospitals(fetchedHospitals)
+            return { vehicles: fetchedVehicles, hospitals: fetchedHospitals }
+        } catch (err) {
+            console.error('Error fetching dispatch resources:', err)
+            return { vehicles: [], hospitals: [] }
+        }
+    }
 
     // Handle selected post from navigation - auto set to in-progress
     useEffect(() => {
@@ -61,7 +96,11 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
             // Only fetch urgent/verified posts that are NOT resolved
             const { data, error } = await supabase
                 .from('posts')
-                .select('*')
+                .select(`
+                    *,
+                    assigned_vehicle:vehicles(id, type, plate_number),
+                    destination_hospital:hospitals(id, name)
+                `)
                 .in('status', ['urgent', 'verified'])
                 .neq('dispatch_status', 'resolved')
                 .order('created_at', { ascending: false })
@@ -70,6 +109,48 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
             const postsData = data || []
             setPosts(postsData)
             
+            // Auto-assign nearest vehicle/hospital if missing
+            const { vehicles: currentVehicles, hospitals: currentHospitals } = await fetchVehiclesAndHospitals()
+            
+            const autoEdits = { ...edits }
+            let hasNewAuto = false
+
+            postsData.forEach(post => {
+                const lat = post.inferred_latitude || post.latitude
+                const lon = post.inferred_longitude || post.longitude
+                
+                if (!lat || !lon) return
+
+                // If no hospital assigned, find nearest
+                if (!post.destination_hospital_id && !autoEdits[post.id]?.destination_hospital_id) {
+                    let minP = Infinity, bestP = null
+                    currentHospitals.forEach(h => {
+                        const d = getDistance(lat, lon, h.latitude, h.longitude)
+                        if (d < minP) { minP = d; bestP = h.id }
+                    })
+                    if (bestP) {
+                        autoEdits[post.id] = { ...autoEdits[post.id], destination_hospital_id: bestP, dispatch_status: 'assigned' }
+                        hasNewAuto = true
+                    }
+                }
+
+                // If no vehicle assigned, find nearest available
+                if (!post.assigned_vehicle_id && !autoEdits[post.id]?.assigned_vehicle_id) {
+                    let minV = Infinity, bestV = null
+                    const availableVehicles = currentVehicles.filter(v => v.status === 'available')
+                    availableVehicles.forEach(v => {
+                        const d = getDistance(lat, lon, v.current_latitude, v.current_longitude)
+                        if (d < minV) { minV = d; bestV = v.id }
+                    })
+                    if (bestV) {
+                        autoEdits[post.id] = { ...autoEdits[post.id], assigned_vehicle_id: bestV, dispatch_status: 'assigned' }
+                        hasNewAuto = true
+                    }
+                }
+            })
+
+            if (hasNewAuto) setEdits(autoEdits)
+
             // Fetch profiles for all unique user_ids
             const userIds = [...new Set(postsData.map(p => p.user_id).filter(Boolean))]
             if (userIds.length > 0) {
@@ -106,7 +187,14 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
 
         const currentStatus = post.dispatch_status || 'pending'
         const newStatus = changes.dispatch_status || currentStatus
-        const newTeam = changes.assigned_team !== undefined ? changes.assigned_team : post.assigned_team
+        const vehicleId = changes.assigned_vehicle_id !== undefined ? changes.assigned_vehicle_id : post.assigned_vehicle_id
+        const hospitalId = changes.destination_hospital_id !== undefined ? changes.destination_hospital_id : post.destination_hospital_id
+        
+        let teamName = post.assigned_team || 'Unassigned'
+        if (vehicleId) {
+            const v = vehicles.find(x => x.id === vehicleId)
+            if (v) teamName = `${v.type} (${v.plate_number})`
+        }
 
         // If transitioning to resolved, show modal for notes
         if (newStatus === 'resolved' && currentStatus !== 'resolved') {
@@ -115,10 +203,10 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
         }
 
         try {
-            await mlApi.updateDispatch(post.id, newStatus, newTeam)
+            await mlApi.updateDispatch(post.id, newStatus, teamName, vehicleId, hospitalId)
             
             // Send email notification to user
-            await sendNotificationEmail(post, newStatus, newTeam)
+            await sendNotificationEmail(post, newStatus, teamName)
             
             setEdits(prev => { const n = { ...prev }; delete n[post.id]; return n })
             fetchDispatchablePosts()
@@ -171,10 +259,15 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
     const confirmResolve = async () => {
         if (!resolveModal) return
         try {
+            const vehicleId = edits[resolveModal.id]?.assigned_vehicle_id || resolveModal.assigned_vehicle_id
+            const hospitalId = edits[resolveModal.id]?.destination_hospital_id || resolveModal.destination_hospital_id
+            const teamName = edits[resolveModal.id]?.assigned_team || resolveModal.assigned_team || 'Rescue Team'
             await mlApi.updateDispatch(
                 resolveModal.id,
                 'resolved',
-                edits[resolveModal.id]?.assigned_team || resolveModal.assigned_team,
+                teamName,
+                vehicleId,
+                hospitalId,
                 resolutionNotes
             )
             setResolveModal(null)
@@ -249,7 +342,8 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">GPS Status</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Severity</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dispatch Status</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assigned Team</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assigned Unit</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Target Hospital</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                             </tr>
                         </thead>
@@ -258,7 +352,8 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
                                 const draft = edits[post.id] || {}
                                 const currentStatus = post.dispatch_status || 'pending'
                                 const displayStatus = draft.dispatch_status || currentStatus
-                                const currentTeam = draft.assigned_team !== undefined ? draft.assigned_team : (post.assigned_team || '')
+                                const selectedVehicle = draft.assigned_vehicle_id !== undefined ? draft.assigned_vehicle_id : (post.assigned_vehicle_id || '')
+                                const selectedHospital = draft.destination_hospital_id !== undefined ? draft.destination_hospital_id : (post.destination_hospital_id || '')
                                 const hasChanges = Object.keys(draft).length > 0
                                 const isHighlighted = highlightedPostId === post.id
 
@@ -307,13 +402,28 @@ export default function DispatchView({ selectedPost, onClearSelection }) {
                                             </select>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <input
-                                                type="text"
-                                                value={currentTeam}
-                                                onChange={(e) => handleEditChange(post.id, 'assigned_team', e.target.value)}
-                                                placeholder="Enter team name..."
+                                            <select
+                                                value={selectedVehicle}
+                                                onChange={(e) => handleEditChange(post.id, 'assigned_vehicle_id', e.target.value)}
                                                 className="w-full px-3 py-2 text-sm border rounded-md focus:ring-blue-500 focus:border-blue-500"
-                                            />
+                                            >
+                                                <option value="">-- Assign Vehicle --</option>
+                                                {vehicles.map(v => (
+                                                    <option key={v.id} value={v.id}>{v.type.replace('_', ' ').toUpperCase()} ({v.plate_number})</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <select
+                                                value={selectedHospital}
+                                                onChange={(e) => handleEditChange(post.id, 'destination_hospital_id', e.target.value)}
+                                                className="w-full px-3 py-2 text-sm border rounded-md focus:ring-blue-500 focus:border-blue-500"
+                                            >
+                                                <option value="">-- Set Destination --</option>
+                                                {hospitals.map(h => (
+                                                    <option key={h.id} value={h.id}>{h.name}</option>
+                                                ))}
+                                            </select>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="flex gap-2">
