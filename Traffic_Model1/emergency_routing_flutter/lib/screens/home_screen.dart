@@ -15,6 +15,7 @@ import '../models/prediction_response.dart';
 import '../providers/health_provider.dart';
 import '../providers/prediction_provider.dart';
 import '../providers/emergency_requests_provider.dart';
+import '../services/backend_service.dart';
 import '../services/routing_service.dart';
 import '../services/unified_service.dart';
 
@@ -53,6 +54,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   // Route result
   RouteResult? _result;
+
+  // Dispatch suggestions (shown on results screen)
+  Map<String, dynamic>? _suggestedVehicle;
 
   // Locations
   LatLng? _originCoord;
@@ -285,6 +289,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _isRouting = false;
       });
 
+      // Suggest the closest available ambulance/vehicle for dispatch.
+      _pickSuggestedVehicle(origin);
+
       // Move map to show route
       _mapCtrl.move(origin, 12.0);
 
@@ -301,11 +308,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  Future<void> _pickSuggestedVehicle(LatLng origin) async {
+    try {
+      final backend = ref.read(backendServiceProvider);
+      await backend.findWorkingBackend();
+      final vehicles = await backend.getAllVehicles();
+      if (!mounted) return;
+
+      final available = vehicles.where((v) {
+        final s = (v['status'] ?? '').toString().toLowerCase();
+        return s == 'available' || s == 'AVAILABLE'.toLowerCase();
+      }).toList();
+      if (available.isEmpty) {
+        setState(() => _suggestedVehicle = null);
+        return;
+      }
+
+      const dist = Distance();
+      available.sort((a, b) {
+        final aLat = (a['lat'] as num?)?.toDouble() ?? 0.0;
+        final aLon = (a['lon'] as num?)?.toDouble() ?? 0.0;
+        final bLat = (b['lat'] as num?)?.toDouble() ?? 0.0;
+        final bLon = (b['lon'] as num?)?.toDouble() ?? 0.0;
+        final dA = dist.as(LengthUnit.Meter, origin, LatLng(aLat, aLon));
+        final dB = dist.as(LengthUnit.Meter, origin, LatLng(bLat, bLon));
+        return dA.compareTo(dB);
+      });
+
+      setState(() => _suggestedVehicle = available.first);
+    } catch (_) {
+      if (mounted) setState(() => _suggestedVehicle = null);
+    }
+  }
+
   void _onDispatch() {
     final result = _result;
     if (result == null) return;
 
     HapticFeedback.heavyImpact();
+
+    final v = _suggestedVehicle;
+    final vehicleLabel = v == null
+        ? 'Nearest available unit'
+        : '${(v['type'] ?? 'ambulance').toString().toUpperCase()} ${(v['id'] ?? '').toString()}';
 
     // Create active dispatch
     final dispatch = ActiveDispatch(
@@ -327,7 +372,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // Add alert
     ref.read(alertsProvider.notifier).addAlert(
       'System',
-      '${result.emergencyType.label} manually dispatched to ${_destCtrl.text}',
+      '$vehicleLabel dispatched to ${_originCtrl.text.isEmpty ? 'victim location' : _originCtrl.text} → ${_destCtrl.text}',
       'success',
     );
 
@@ -335,7 +380,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _resetToIdle();
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('✅ ${result.emergencyType.label} Dispatched safely!',
+      content: Text('✅ $vehicleLabel dispatched to ${_destCtrl.text}',
           style: GoogleFonts.rajdhani(color: Colors.white, fontWeight: FontWeight.bold)),
       backgroundColor: kSuccess,
       behavior: SnackBarBehavior.floating,
@@ -1152,7 +1197,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         // ETA COMPARISON CARD — the hero element
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _EtaComparisonCard(result: result),
+          child: _EtaComparisonCard(
+            result: result,
+            destinationName: _destCtrl.text.isEmpty ? 'Nearest Hospital' : _destCtrl.text,
+            vehicleLabel: _suggestedVehicle == null
+                ? null
+                : '${(_suggestedVehicle!['type'] ?? 'ambulance').toString().toUpperCase()} ${(_suggestedVehicle!['id'] ?? '').toString()}',
+          ),
         )
             .animate()
             .slideY(begin: 0.3, end: 0, duration: 350.ms, curve: Curves.easeOut)
@@ -1200,6 +1251,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: _DispatchButton(
             emergencyType: result.emergencyType,
             etaMin: result.aiEtaMin,
+            destinationName: _destCtrl.text.isEmpty ? 'Nearest Hospital' : _destCtrl.text,
+            vehicleLabel: _suggestedVehicle == null
+                ? null
+                : '${(_suggestedVehicle!['type'] ?? 'ambulance').toString().toUpperCase()} ${(_suggestedVehicle!['id'] ?? '').toString()}',
             onDispatch: _onDispatch,
           ),
         )
@@ -1667,7 +1722,14 @@ class _AnalyzeButton extends StatelessWidget {
 
 class _EtaComparisonCard extends StatelessWidget {
   final RouteResult result;
-  const _EtaComparisonCard({required this.result});
+  final String destinationName;
+  final String? vehicleLabel;
+
+  const _EtaComparisonCard({
+    required this.result,
+    required this.destinationName,
+    this.vehicleLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1705,6 +1767,41 @@ class _EtaComparisonCard extends StatelessWidget {
               style: GoogleFonts.rajdhani(
                   color: kTextSecondary, fontSize: 12)),
         ]),
+
+        const SizedBox(height: 10),
+
+        // Destination + Unit summary (new)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.local_hospital, color: kAiCyan, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  destinationName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.rajdhani(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (vehicleLabel != null) ...[
+                const Icon(Icons.local_shipping, color: kEmergencyOrange, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  vehicleLabel!,
+                  style: GoogleFonts.rajdhani(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ],
+          ),
+        ),
 
         const SizedBox(height: 16),
 
@@ -2256,11 +2353,15 @@ class _CongestionForecastBar extends StatelessWidget {
 class _DispatchButton extends StatelessWidget {
   final EmergencyType emergencyType;
   final double etaMin;
+  final String destinationName;
+  final String? vehicleLabel;
   final VoidCallback onDispatch;
 
   const _DispatchButton({
     required this.emergencyType,
     required this.etaMin,
+    required this.destinationName,
+    this.vehicleLabel,
     required this.onDispatch,
   });
 
@@ -2296,10 +2397,18 @@ class _DispatchButton extends StatelessWidget {
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1.2)),
-                Text('ETA: ${etaMin.toStringAsFixed(0)} min via AI route',
+                SizedBox(
+                  width: 240,
+                  child: Text(
+                    '${vehicleLabel ?? 'AUTO-ASSIGN'} → $destinationName • ETA ${etaMin.toStringAsFixed(0)} min',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.rajdhani(
-                        color: Colors.white.withOpacity(0.8),
-                        fontSize: 11)),
+                        color: Colors.white.withOpacity(0.85),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
               ],
             ),
             const Spacer(),

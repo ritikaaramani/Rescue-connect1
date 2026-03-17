@@ -11,6 +11,7 @@ import '../config/theme.dart';
 import '../models/route_model.dart';
 import '../providers/emergency_requests_provider.dart';
 import '../services/backend_service.dart';
+import '../services/supabase_location_service.dart';
 
 import 'live_tracking_screen.dart';
 
@@ -38,6 +39,7 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
   List<Map<String, dynamic>> _availableVehicles = [];
   List<Map<String, dynamic>> _availableHospitals = [];
   bool _isLoadingResources = false;
+  StreamSubscription<IncidentLocationUpdate>? _realtimeSub;
 
   @override
   void initState() {
@@ -69,6 +71,39 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
           'error',
         );
       }
+
+      // Subscribe to realtime location updates from authority dashboard
+      final locationService = ref.read(supabaseLocationServiceProvider);
+      _realtimeSub = locationService.locationUpdates.listen((update) {
+        if (!mounted) return;
+        HapticFeedback.heavyImpact();
+        // Switch to INCOMING tab so dispatcher sees the new event
+        setState(() => _tab = 0);
+        // Show a persistent notification banner
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 6),
+            backgroundColor: kDanger,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Row(children: [
+              const Icon(Icons.location_on, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('🚨 NEW ML LOCATION DETECTED',
+                      style: GoogleFonts.rajdhani(
+                          color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                  Text('${update.disasterType} at ${update.locationLabel}',
+                      style: GoogleFonts.rajdhani(color: Colors.white70, fontSize: 11),
+                      overflow: TextOverflow.ellipsis),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      });
     });
   }
 
@@ -194,6 +229,7 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
   void dispose() {
     _pulseCtrl.dispose();
     _refreshTimer?.cancel();
+    _realtimeSub?.cancel();
     super.dispose();
   }
 

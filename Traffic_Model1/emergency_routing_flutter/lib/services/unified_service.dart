@@ -94,9 +94,25 @@ class UnifiedService {
         queryParameters: {
           'lat': currentPos.latitude,
           'lon': currentPos.longitude,
+          'limit': 8,
         },
       );
-      return (response.data as List).map((x) => Hospital.fromJson(x)).toList();
+      final list = (response.data as List).map((x) => Hospital.fromJson(x)).toList();
+
+      // Defensive: ensure we never pick a hospital from a different far-away city.
+      // Some backends sort by ICU beds; we always sort by true distance.
+      const dist = Distance();
+      final withDist = list
+          .map((h) => MapEntry(h, dist.as(LengthUnit.Kilometer, currentPos, h.location)))
+          .toList();
+      withDist.sort((a, b) => a.value.compareTo(b.value));
+
+      // Filter to "local" hospitals if possible (within 120km of currentPos).
+      final local = withDist.where((e) => e.value <= 120).map((e) => e.key).toList();
+      if (local.isNotEmpty) return local.take(5).toList();
+
+      // Fallback: return sorted by distance even if all are far.
+      return withDist.map((e) => e.key).take(5).toList();
     } catch (e) {
       throw Exception('Failed to load hospitals: $e');
     }

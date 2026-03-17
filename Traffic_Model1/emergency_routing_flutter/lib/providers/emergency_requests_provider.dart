@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:latlong2/latlong.dart';
 import '../models/route_model.dart';
 import '../services/backend_service.dart';
+import '../services/supabase_location_service.dart';
 
 // ── Providers ──────────────────────────────────────────────────────────────
 
@@ -16,15 +17,60 @@ final selectedIncidentForRoutingProvider = StateProvider<EmergencyRequest?>((ref
 // Emergency Requests
 class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
   Timer? _timer;
+  StreamSubscription<IncidentLocationUpdate>? _locationSub;
   final Ref ref;
 
   EmergencyRequestsNotifier(this.ref) : super([]) {
     _load();
     _fetchRealData();
-    // Poll every 15s instead of generating mocks
+    // Poll every 15s as a safety net for missed realtime events
     _timer = Timer.periodic(const Duration(seconds: 15), (_) {
       _fetchRealData();
     });
+    // Also listen to Supabase realtime for instant updates
+    _subscribeToRealtime();
+  }
+
+  void _subscribeToRealtime() {
+    final locationService = ref.read(supabaseLocationServiceProvider);
+    _locationSub = locationService.locationUpdates.listen((update) {
+      // Check if this post already exists in state
+      final exists = state.any((r) => r.id == update.postId);
+      if (!exists) {
+        // Create a new EmergencyRequest from the realtime update
+        final newRequest = EmergencyRequest(
+          id: update.postId,
+          type: _parseEmergencyType(update.disasterType),
+          rawType: update.disasterType,
+          priority: _parseRealtimePriority(update.severity),
+          originCoord: update.incidentCoord,
+          destCoord: update.hospitalCoord ?? const LatLng(22.7533, 75.8937),
+          originLabel: update.locationLabel,
+          destLabel: update.hospitalName ?? 'Nearest Hospital',
+          timestamp: update.receivedAt,
+          callerInfo: 'ML Auto-Detected',
+          witnessReports: [],
+          ambulanceEtaMin: 10,
+          patientCondition: 'Unknown',
+          state: IncidentState.reported,
+        );
+        state = [newRequest, ...state];
+        _save();
+        debugPrint('🚨 Realtime: New incident added → ${update.locationLabel}');
+      }
+    });
+  }
+
+  Priority _parseRealtimePriority(String severity) {
+    switch (severity.toLowerCase()) {
+      case 'critical':
+      case 'high':
+        return Priority.high;
+      case 'medium':
+        return Priority.medium;
+      default:
+        return Priority.low;
+    }
   }
 
   Future<void> _fetchRealData() async {
@@ -103,6 +149,7 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
   @override
   void dispose() {
     _timer?.cancel();
+    _locationSub?.cancel();
     super.dispose();
   }
 
