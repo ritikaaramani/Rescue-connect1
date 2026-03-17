@@ -18,12 +18,12 @@ timeout /t 2 /nobreak >nul
 
 :: --- React Simulator App ---
 echo [1/3] Starting React Simulator App...
-start "React-Simulator" cmd /k "cd /d %~dp0user_app\rescue_connect\simulator && npm run dev"
+start "React-Simulator" cmd /k "cd /d %~dp0user_app\rescue_connect\simulator && if not exist node_modules (npm install) && npm run dev"
 timeout /t 3 /nobreak >nul
 
 :: --- React Authority Dashboard ---
 echo [2/3] Starting React Authority Dashboard...
-start "React-Authority" cmd /k "cd /d %~dp0user_app\rescue_connect\authority && npm run dev"
+start "React-Authority" cmd /k "cd /d %~dp0user_app\rescue_connect\authority && if not exist node_modules (npm install) && npm run dev"
 timeout /t 3 /nobreak >nul
 
 :: --- Flutter App (--no-dds disables the Dart Development Service which was failing) ---
