@@ -95,21 +95,30 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
   Future<void> _dispatchRequest(EmergencyRequest req) async {
     HapticFeedback.heavyImpact();
 
-    // Show Picker Dialog
-    final SelectionResult? selection = await showDialog<SelectionResult>(
-      context: context,
-      builder: (context) => _ResourcePickerDialog(
-        vehicles: _availableVehicles.where((v) => v['status'] == 'AVAILABLE').toList(),
-        hospitals: _availableHospitals,
-      ),
-    );
+    if (_availableHospitals.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hospitals available via backend. Wait for resources.')));
+      return;
+    }
 
-    if (selection == null) return;
+    final availableVehicles = _availableVehicles.where((v) => v['status'] == 'AVAILABLE').toList();
+    if (availableVehicles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No available vehicles right now.')));
+      return;
+    }
+
+    // Auto-select nearest hospital
+    const distance = Distance();
+    final sortedHospitals = List<Map<String, dynamic>>.from(_availableHospitals);
+    sortedHospitals.sort((a, b) {
+      final distA = distance.as(LengthUnit.Meter, req.originCoord, LatLng(a['lat'], a['lon']));
+      final distB = distance.as(LengthUnit.Meter, req.originCoord, LatLng(b['lat'], b['lon']));
+      return distA.compareTo(distB);
+    });
 
     try {
       final backend = ref.read(backendServiceProvider);
-      final vehicle = selection.vehicle;
-      final hospital = selection.hospital;
+      final vehicle = availableVehicles.first;
+      final hospital = sortedHospitals.first;
 
       // Call backend dispatch API
       final result = await backend.dispatchIncident(
@@ -434,7 +443,10 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
         final req = pending[i];
         return _IncomingRequestCard(
           request: req,
-          onDispatch: () => _showDispatchDialog(req),
+          onDispatch: () {
+            ref.read(selectedIncidentForRoutingProvider.notifier).state = req;
+            ref.read(mainAppTabProvider.notifier).state = 1;
+          },
         ).animate().fadeIn(duration: 250.ms, delay: Duration(milliseconds: i * 50))
             .slideX(begin: 0.05, end: 0);
       },
@@ -476,9 +488,10 @@ class _DispatchScreenState extends ConsumerState<DispatchScreen>
             ),
             onPressed: () {
               Navigator.pop(ctx);
-              _dispatchRequest(req);
+              ref.read(selectedIncidentForRoutingProvider.notifier).state = req;
+              ref.read(mainAppTabProvider.notifier).state = 1;
             },
-            child: Text('DISPATCH NOW',
+            child: Text('ASSIGN VEHICLE',
                 style: GoogleFonts.rajdhani(
                     color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
           ),
@@ -703,21 +716,22 @@ class _IncomingRequestCard extends StatelessWidget {
               border: Border.all(color: req.priority.color.withOpacity(0.25)),
             ),
             child: Row(children: [
-              // Type icon
-              Container(
-                width: 44, height: 44,
-                decoration: BoxDecoration(
-                  color: req.type.color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
+              // Type icon or Image
+              req.videoFeedUrl != null ? ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  req.videoFeedUrl!,
+                  width: 50, height: 50,
+                  fit: BoxFit.cover,
+                  errorBuilder: (ctx, err, stack) => _buildFallbackIcon(req),
                 ),
-                child: Icon(req.type.icon, color: req.type.color, size: 22),
-              ),
+              ) : _buildFallbackIcon(req),
               const SizedBox(width: 12),
               // Info
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
-                    Text(req.type.label.toUpperCase(),
+                    Text(req.rawType.toUpperCase(),
                         style: GoogleFonts.rajdhani(
                             color: req.type.color,
                             fontSize: 13,
@@ -777,18 +791,32 @@ class _IncomingRequestCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               // Dispatch arrow
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: req.type.color.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(10),
+              GestureDetector(
+                onTap: onDispatch,
+                child: Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: req.type.color.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.send, color: req.type.color, size: 16),
                 ),
-                child: Icon(Icons.send, color: req.type.color, size: 16),
               ),
             ]),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildFallbackIcon(EmergencyRequest req) {
+    return Container(
+      width: 50, height: 50,
+      decoration: BoxDecoration(
+        color: req.type.color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(req.type.icon, color: req.type.color, size: 24),
     );
   }
 
@@ -832,9 +860,24 @@ class _IncomingRequestCard extends StatelessWidget {
                         children: [
                           Icon(req.videoFeedUrl != null ? Icons.videocam : Icons.videocam_off, color: req.videoFeedUrl != null ? Colors.redAccent : Colors.grey, size: 16),
                           const SizedBox(width: 4),
-                          Text(req.videoFeedUrl != null ? 'Caller video feed: LIVE' : 'Caller video feed: OFFLINE', style: TextStyle(color: req.videoFeedUrl != null ? Colors.redAccent : Colors.grey)),
+                          Text(req.videoFeedUrl != null ? 'Database Feed: LIVE' : 'Feed: OFFLINE', style: TextStyle(color: req.videoFeedUrl != null ? Colors.redAccent : Colors.grey)),
                         ],
                       ),
+                      if (req.videoFeedUrl != null) ...[
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 250),
+                            child: Image.network(
+                              req.videoFeedUrl!,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (ctx, err, stack) => const Text('Image unavailable at URL', style: TextStyle(color: Colors.white54)),
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Text('Ambulance ETA: ${req.ambulanceEtaMin != null ? "${req.ambulanceEtaMin} minutes" : "Calculating..."}', style: const TextStyle(color: Colors.white70)),
                       Text('Patient condition: ${req.patientCondition ?? "Unknown"}', style: const TextStyle(color: Colors.white70)),

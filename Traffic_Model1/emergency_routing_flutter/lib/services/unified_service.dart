@@ -128,4 +128,76 @@ class UnifiedService {
       return [];
     }
   }
+
+  Future<List<Map<String, dynamic>>> getActiveIncidents() async {
+    try {
+      final supabaseUrl = 'https://uhlnwyrikuiprkuubloh.supabase.co';
+      final supabaseKey = 'sb_publishable_3AB7L_OofX-B7hlO7mWUrA_vrSq5cBO';
+      
+      final url = '$supabaseUrl/rest/v1/posts?dispatch_status=in.(pending,assigned,in-progress)&order=created_at.desc';
+      final response = await _dio.get(url, options: Options(
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer $supabaseKey',
+          'Content-Type': 'application/json',
+        },
+      ));
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> posts = response.data;
+        
+        return posts.map((post) {
+           final location = post['location'];
+           double lat = 22.7196; // Default Indore
+           double lon = 75.8577;
+           
+           if (post['inferred_latitude'] != null && post['inferred_longitude'] != null) {
+              lat = double.tryParse(post['inferred_latitude'].toString()) ?? lat;
+              lon = double.tryParse(post['inferred_longitude'].toString()) ?? lon;
+           } else if (location is Map && location['lat'] != null) {
+              lat = double.tryParse(location['lat'].toString()) ?? lat;
+              lon = double.tryParse(location['lon'].toString()) ?? lon;
+           } else if (location is Map && location['latitude'] != null) {
+              lat = double.tryParse(location['latitude'].toString()) ?? lat;
+              lon = double.tryParse(location['longitude'].toString()) ?? lon;
+           }
+           
+           int severity = int.tryParse(post['severity']?.toString() ?? '5') ?? 5;
+           String priority = severity >= 7 ? 'High' : 'Medium';
+           
+           String incidentType = post['disaster_type']?.toString() ?? 'Emergency';
+           if (post['ai_analysis'] is Map && post['ai_analysis']['disaster_type'] != null) {
+               incidentType = post['ai_analysis']['disaster_type'];
+           }
+           
+           String locLabel = 'Disaster Location';
+           if (post['extracted_locations'] is List && (post['extracted_locations'] as List).isNotEmpty) {
+               locLabel = post['extracted_locations'][0].toString();
+           }
+           
+           return {
+             "id": post['id'].toString(),
+             "type": incidentType,
+             "priority": priority,
+             "originCoord": {"latitude": lat, "longitude": lon},
+             "destCoord": {"latitude": 22.7533, "longitude": 75.8937},
+             "originLabel": locLabel,
+             "destLabel": "Nearest Hospital",
+             "timestamp": post['created_at'] ?? DateTime.now().toIso8601String(),
+             "callerInfo": "Citizen Report",
+             "witnessReports": [],
+             "state": post['dispatch_status'] ?? "pending",
+             "videoFeedUrl": post['image_url'],
+             "ambulanceEtaMin": 10,
+             "patientCondition": "Unknown",
+             "assignedHospital": post['assigned_team'],
+           };
+        }).toList();
+      }
+      return [];
+    } catch (e) {
+      print('❌ Error fetching direct supabase incidents in unified_service: $e');
+      return [];
+    }
+  }
 }

@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../providers/health_provider.dart';
+import '../providers/emergency_requests_provider.dart'; // Add this line
 import 'home_screen.dart';
 import 'dispatch_screen.dart';
 
@@ -22,8 +23,6 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
-  int _idx = 0;
-
   @override
   void initState() {
     super.initState();
@@ -45,8 +44,8 @@ class _MainShellState extends ConsumerState<MainShell> {
   // 9. Mission Logs -> MissionLogsScreen
   // 10. Settings -> SettingsScreen
 
-  Widget _buildContent() {
-    switch (_idx) {
+  Widget _buildContent(int idx) {
+    switch (idx) {
       case 0: return const DispatchScreen(initialTab: 0); // Incoming
       case 1: return const HomeScreen(); // Live Map
       case 2: return const DispatchScreen(initialTab: 1); // Active Missions
@@ -63,15 +62,16 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final idx = ref.watch(mainAppTabProvider);
     return Scaffold(
       backgroundColor: kBackground,
       body: Row(
         children: [
           _SideNav(
-            selected: _idx,
-            onTap: (i) => setState(() => _idx = i),
+            selected: idx,
+            onTap: (i) => ref.read(mainAppTabProvider.notifier).state = i,
           ),
-          Expanded(child: _buildContent()),
+          Expanded(child: _buildContent(idx)),
         ],
       ),
     );

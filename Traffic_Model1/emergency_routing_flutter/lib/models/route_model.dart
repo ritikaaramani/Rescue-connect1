@@ -306,6 +306,7 @@ class WitnessReport {
 class EmergencyRequest {
   final String id;
   final EmergencyType type;
+  final String rawType;
   final Priority priority;
   final LatLng originCoord;
   final LatLng destCoord;
@@ -325,6 +326,7 @@ class EmergencyRequest {
   EmergencyRequest({
     required this.id,
     required this.type,
+    this.rawType = 'Emergency',
     required this.priority,
     required this.originCoord,
     required this.destCoord,
@@ -359,6 +361,7 @@ class EmergencyRequest {
     return EmergencyRequest(
       id: id,
       type: type,
+      rawType: rawType,
       priority: priority,
       originCoord: originCoord,
       destCoord: destCoord,
@@ -378,6 +381,7 @@ class EmergencyRequest {
   Map<String, dynamic> toJson() => {
     'id': id,
     'type': type.name,
+    'rawType': rawType,
     'priority': priority.name,
     'originCoord': {'lat': originCoord.latitude, 'lng': originCoord.longitude},
     'destCoord': {'lat': destCoord.latitude, 'lng': destCoord.longitude},
@@ -396,6 +400,7 @@ class EmergencyRequest {
   factory EmergencyRequest.fromJson(Map<String, dynamic> json) => EmergencyRequest(
     id: json['id'],
     type: EmergencyType.fromName(json['type']),
+    rawType: json['rawType'] ?? 'Emergency',
     priority: Priority.fromName(json['priority']),
     originCoord: LatLng(json['originCoord']['lat'], json['originCoord']['lng']),
     destCoord: LatLng(json['destCoord']['lat'], json['destCoord']['lng']),

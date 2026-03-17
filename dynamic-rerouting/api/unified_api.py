@@ -17,6 +17,19 @@ import httpx
 # Add parent directory to path  
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
+
+# Try to load .env from the React Authority app
+env_path = os.path.join(Path(__file__).parent.parent.parent, "user_app", "rescue_connect", "authority", ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+    
+# Alias variables if they use the VITE_ prefix
+if not os.environ.get("SUPABASE_URL") and os.environ.get("VITE_SUPABASE_URL"):
+    os.environ["SUPABASE_URL"] = os.environ.get("VITE_SUPABASE_URL")
+if not os.environ.get("SUPABASE_SERVICE_KEY") and os.environ.get("VITE_SUPABASE_ANON_KEY"):
+    os.environ["SUPABASE_SERVICE_KEY"] = os.environ.get("VITE_SUPABASE_ANON_KEY")
+
 # Import new modules
 from websocket_manager import manager
 from incident_service import IncidentService
@@ -62,9 +75,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Include test integration router
@@ -277,6 +291,89 @@ async def assign_vehicle(incident_id: str, vehicle_id: str):
             MESSAGE_LOG.append({"from": "Dispatcher", "msg": f"Vehicle {vehicle_id} assigned to incident {incident_id}", "time": time.strftime("%H:%M")})
             return {"status": "success", "message": f"Vehicle {vehicle_id} dispatched."}
     raise HTTPException(status_code=404, detail="Incident not found")
+
+@app.get("/incidents/active")
+async def get_active_incidents():
+    """Fetch active incidents directly from Supabase for the Flutter app."""
+    try:
+        supabase_url = os.environ.get("SUPABASE_URL", "")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        
+        if not supabase_url or not supabase_key:
+            logger.warning("/incidents/active: Supabase not configured, using mock")
+            return INCIDENT_LOG
+            
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{supabase_url}/rest/v1/posts",
+                headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}",
+                    "Content-Type": "application/json"
+                },
+                params={
+                    "dispatch_status": "in.(pending,assigned,in-progress)",
+                    "order": "created_at.desc",
+                    "limit": "50",
+                },
+            )
+            resp.raise_for_status()
+            posts = resp.json()
+            
+            formatted_incidents = []
+            for post in posts:
+                post_id = str(post.get("id", ""))
+                location = post.get("location")
+                
+                # Prioritize explicit AI inferred coordinates
+                if post.get("inferred_latitude") and post.get("inferred_longitude"):
+                    lat = float(post["inferred_latitude"])
+                    lon = float(post["inferred_longitude"])
+                elif isinstance(location, dict) and (location.get("lat") or location.get("latitude")):
+                    lat = float(location.get("lat") or location.get("latitude"))
+                    lon = float(location.get("lon") or location.get("longitude"))
+                else:
+                    # Default center for Indore if missing
+                    lat = 22.7196
+                    lon = 75.8577
+                    
+                severity = int(post.get("severity") or 5)
+                priority = "High" if severity >= 7 else "Medium"
+                
+                ai_analysis = post.get("ai_analysis") or {}
+                incident_type = post.get("disaster_type") or ai_analysis.get("disaster_type") or "Emergency"
+                
+                loc_label = post.get("location")
+                if isinstance(loc_label, dict):
+                    loc_label = None
+                if not loc_label and post.get("extracted_locations"):
+                    loc_label = post["extracted_locations"][0]
+                if not loc_label:
+                    loc_label = "Disaster Location"
+
+                formatted_incidents.append({
+                    "id": post_id,
+                    "type": incident_type.capitalize(),
+                    "priority": priority,
+                    "originCoord": {"latitude": lat, "longitude": lon},
+                    "destCoord": {"latitude": 22.7533, "longitude": 75.8937}, # Default hospital, will be dynamically replaced
+                    "originLabel": str(loc_label),
+                    "destLabel": "Nearest Hospital",
+                    "timestamp": post.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "callerInfo": "Citizen Report (Supabase)",
+                    "witnessReports": [],
+                    "state": post.get("dispatch_status") or "pending",
+                    "videoFeedUrl": post.get("image_url"),
+                    "ambulanceEtaMin": 10,
+                    "patientCondition": "Unknown",
+                    "assignedHospital": post.get("assigned_team") or None
+                })
+            
+            return formatted_incidents
+            
+    except Exception as exc:
+        logger.error(f"Error fetching active incidents from Supabase: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to fetch active incidents from DB")
 
 @app.get("/incident/scene/{incident_id}")
 async def get_digital_scene(incident_id: str):

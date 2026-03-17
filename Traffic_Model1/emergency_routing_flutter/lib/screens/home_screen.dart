@@ -97,6 +97,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(healthStateProvider.notifier).fetch();
+      
+      // Handle incident dispatch redirection if one was selected
+      final existingIncident = ref.read(selectedIncidentForRoutingProvider);
+      if (existingIncident != null) {
+        ref.read(selectedIncidentForRoutingProvider.notifier).state = null;
+        if (mounted) {
+          setState(() {
+            _originCoord = existingIncident.originCoord;
+            _originCtrl.text = existingIncident.originLabel;
+            _emergencyType = existingIncident.type;
+            _phase = _Phase.searching;
+          });
+          _mapCtrl.move(existingIncident.originCoord, 15.0);
+          _findNearestHospitals();
+        }
+      }
     });
   }
 
@@ -362,10 +378,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final hospitals = await _unifiedService.getNearestHospitals(pos);
       if (!mounted) return;
       
-      _showHospitalResults(hospitals);
+      if (hospitals.isNotEmpty) {
+        final best = hospitals.first;
+        setState(() {
+          _destCtrl.text = best.name;
+          _destCoord = best.location;
+        });
+        _analyzeRoute();
+      } else {
+        _useFallbackHospital();
+      }
     } catch (e) {
-      _snack('Could not reach Hospital Orchestrator: $e', error: true);
+      if (!mounted) return;
+      _useFallbackHospital();
     }
+  }
+
+  void _useFallbackHospital() {
+    setState(() {
+      _destCtrl.text = "State General Hospital (Fallback)";
+      _destCoord = LatLng(
+        (_originCoord?.latitude ?? _city.lat) + 0.015,
+        (_originCoord?.longitude ?? _city.lng) + 0.02,
+      );
+    });
+    _snack('Used fallback hospital for routing.', error: false);
+    _analyzeRoute();
   }
 
   void _showHospitalResults(List<Hospital> hospitals) {
@@ -440,6 +478,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<EmergencyRequest?>(selectedIncidentForRoutingProvider, (prev, next) {
+      if (next != null) {
+        Future.microtask(() => ref.read(selectedIncidentForRoutingProvider.notifier).state = null);
+        
+        setState(() {
+          _originCoord = next.originCoord;
+          _originCtrl.text = next.originLabel;
+          _emergencyType = next.type;
+          _phase = _Phase.searching;
+        });
+        _mapCtrl.move(next.originCoord, 15.0);
+        _findNearestHospitals();
+      }
+    });
+
     final health = ref.watch(healthStateProvider);
     final aiOnline = health?.status == 'ok';
     final result = _result;
