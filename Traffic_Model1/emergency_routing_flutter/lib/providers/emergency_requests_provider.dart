@@ -92,6 +92,7 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
       final newRequests = incidents.map((data) {
         return EmergencyRequest(
           id: data['id'] ?? 'N/A',
+          reporterUserId: data['reporterUserId']?.toString(),
           type: _parseEmergencyType(data['type']),
           rawType: data['type']?.toString() ?? 'Emergency',
           priority: _parsePriority(data['priority']),
@@ -182,6 +183,7 @@ class EmergencyRequestsNotifier extends StateNotifier<List<EmergencyRequest>> {
         final coord = LatLng(lat, lon);
         final req = EmergencyRequest(
           id: postId,
+          reporterUserId: post['user_id']?.toString(),
           type: eType,
           rawType: rawType,
           priority: Priority.high,

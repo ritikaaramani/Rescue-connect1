@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +62,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Locations
   LatLng? _originCoord;
   LatLng? _destCoord;
+  EmergencyRequest? _routingIncidentContext;
+  final Set<String> _sentNotificationKeys = <String>{};
 
   // Text controllers
   final _originCtrl = TextEditingController();
@@ -108,6 +111,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(selectedIncidentForRoutingProvider.notifier).state = null;
         if (mounted) {
           setState(() {
+            _routingIncidentContext = existingIncident;
             _originCoord = existingIncident.originCoord;
             _originCtrl.text = existingIncident.originLabel;
             _emergencyType = existingIncident.type;
@@ -345,6 +349,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final result = _result;
     if (result == null) return;
 
+    if (result.polyline.isEmpty) {
+      _snack('Route is not ready yet. Please analyze again.', error: true);
+      return;
+    }
+
+    final pickup = result.polyline.first;
+    final drop = result.polyline.last;
+
     HapticFeedback.heavyImpact();
 
     final v = _suggestedVehicle;
@@ -358,8 +370,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       type: result.emergencyType,
       origin: _originCtrl.text.isEmpty ? 'Current Location' : _originCtrl.text,
       destination: _destCtrl.text,
-      originCoord: result.polyline.first,
-      destCoord: result.polyline.last,
+      originCoord: pickup,
+      destCoord: drop,
       etaMin: result.aiEtaMin,
       dispatchedAt: DateTime.now(),
       cityName: _city.name,
@@ -376,6 +388,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       'success',
     );
 
+    final incident = _routingIncidentContext;
+    final hospitalName = _destCtrl.text.trim().isEmpty
+        ? 'Nearest Hospital'
+        : _destCtrl.text.trim();
+    final mapLink = _buildGoogleDirectionsLink(pickup, drop);
+
+    if (incident?.reporterUserId != null && incident!.reporterUserId!.isNotEmpty) {
+      final idempotencyKey =
+          '${incident.id}:${incident.reporterUserId}:${pickup.latitude.toStringAsFixed(5)},${pickup.longitude.toStringAsFixed(5)}:${drop.latitude.toStringAsFixed(5)},${drop.longitude.toStringAsFixed(5)}';
+
+      unawaited(
+        _sendRoutingStartNotification(
+          incident: incident,
+          pickup: pickup,
+          drop: drop,
+          hospitalName: hospitalName,
+          vehicleLabel: vehicleLabel,
+          mapLink: mapLink,
+          idempotencyKey: idempotencyKey,
+        ),
+      );
+    } else {
+      debugPrint('Skipping routing-start email: reporter user id unavailable.');
+    }
+
     // Reset to idle
     _resetToIdle();
 
@@ -389,12 +426,64 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ));
   }
 
+  Future<void> _sendRoutingStartNotification({
+    required EmergencyRequest incident,
+    required LatLng pickup,
+    required LatLng drop,
+    required String hospitalName,
+    required String vehicleLabel,
+    required String mapLink,
+    required String idempotencyKey,
+  }) async {
+    if (_sentNotificationKeys.contains(idempotencyKey)) {
+      return;
+    }
+    _sentNotificationKeys.add(idempotencyKey);
+
+    try {
+      final backend = ref.read(backendServiceProvider);
+      final response = await backend.sendRoutingStartNotification(
+        postId: incident.id,
+        userId: incident.reporterUserId!,
+        status: 'assigned',
+        teamName: vehicleLabel,
+        disasterType: incident.rawType,
+        location: incident.originLabel,
+        pickupLat: pickup.latitude,
+        pickupLon: pickup.longitude,
+        dropLat: drop.latitude,
+        dropLon: drop.longitude,
+        nearbyHospitalName: hospitalName,
+        mapLink: mapLink,
+        idempotencyKey: idempotencyKey,
+        singleRecipientOnly: true,
+      );
+
+      if (response['email_sent'] != true) {
+        throw Exception(response['error'] ?? 'ML backend did not confirm email delivery');
+      }
+    } catch (e) {
+      _sentNotificationKeys.remove(idempotencyKey);
+      if (mounted) {
+        _snack('Navigation started, but email notification failed.', error: true);
+      }
+      debugPrint('Routing-start notification failed: $e');
+    }
+  }
+
+  String _buildGoogleDirectionsLink(LatLng pickup, LatLng drop) {
+    final origin = '${pickup.latitude},${pickup.longitude}';
+    final destination = '${drop.latitude},${drop.longitude}';
+    return 'https://www.google.com/maps/dir/?api=1&origin=$origin&destination=$destination&travelmode=driving';
+  }
+
   void _resetToIdle() {
     setState(() {
       _phase = _Phase.idle;
       _result = null;
       _originCoord = null;
       _destCoord = null;
+      _routingIncidentContext = null;
       _originCtrl.clear();
       _destCtrl.clear();
     });
@@ -2398,7 +2487,7 @@ class _DispatchButton extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('DISPATCH ${emergencyType.label.toUpperCase()}',
+                Text('START NAVIGATION',
                     style: GoogleFonts.rajdhani(
                         color: Colors.white,
                         fontSize: 15,

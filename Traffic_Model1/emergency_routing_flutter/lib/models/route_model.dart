@@ -305,6 +305,7 @@ class WitnessReport {
 
 class EmergencyRequest {
   final String id;
+  final String? reporterUserId;
   final EmergencyType type;
   final String rawType;
   final Priority priority;
@@ -325,6 +326,7 @@ class EmergencyRequest {
 
   EmergencyRequest({
     required this.id,
+    this.reporterUserId,
     required this.type,
     this.rawType = 'Emergency',
     required this.priority,
@@ -357,9 +359,11 @@ class EmergencyRequest {
     String? patientCondition,
     int? ambulanceEtaMin,
     String? assignedHospital,
+    String? reporterUserId,
   }) {
     return EmergencyRequest(
       id: id,
+      reporterUserId: reporterUserId ?? this.reporterUserId,
       type: type,
       rawType: rawType,
       priority: priority,
@@ -380,6 +384,7 @@ class EmergencyRequest {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    'reporterUserId': reporterUserId,
     'type': type.name,
     'rawType': rawType,
     'priority': priority.name,
@@ -399,6 +404,7 @@ class EmergencyRequest {
 
   factory EmergencyRequest.fromJson(Map<String, dynamic> json) => EmergencyRequest(
     id: json['id'],
+    reporterUserId: json['reporterUserId'],
     type: EmergencyType.fromName(json['type']),
     rawType: json['rawType'] ?? 'Emergency',
     priority: Priority.fromName(json['priority']),

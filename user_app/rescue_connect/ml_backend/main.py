@@ -30,7 +30,16 @@ app = FastAPI(
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ],
+    # Accept any localhost/127.0.0.1 dev port for web clients.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -629,6 +638,16 @@ class NotificationRequest(BaseModel):
     team_name: str = "Rescue Team"
     disaster_type: str = "Emergency"
     location: str = "your reported location"
+    pickup_lat: Optional[float] = None
+    pickup_lon: Optional[float] = None
+    drop_lat: Optional[float] = None
+    drop_lon: Optional[float] = None
+    nearby_hospital_name: Optional[str] = None
+    map_link: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    single_recipient_only: bool = True
+    recipient_email: Optional[str] = None
+    recipient_emails: Optional[List[str]] = None
 
 
 @app.post("/send-notification")
@@ -638,18 +657,30 @@ async def send_notification(request: NotificationRequest):
     Uses Supabase to fetch user email and sends via Resend API.
     """
     import resend
+
+    if request.single_recipient_only:
+        if request.recipient_emails and len(request.recipient_emails) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="single_recipient_only=true allows exactly one recipient"
+            )
     
     try:
-        # Get user email from auth.users via Supabase Admin API
-        # First get user profile to get display name
-        profile_response = supabase.table("profiles")\
-            .select("username, display_name")\
-            .eq("id", request.user_id)\
-            .single()\
-            .execute()
-        
-        profile = profile_response.data or {}
-        user_name = profile.get("display_name") or profile.get("username") or "User"
+        if supabase is None:
+            raise HTTPException(status_code=500, detail="Supabase is not configured for notification delivery")
+
+        # Try profile lookup for display name, but do not fail delivery if profile is missing.
+        user_name = "User"
+        try:
+            profile_response = supabase.table("profiles")\
+                .select("username, display_name")\
+                .eq("id", request.user_id)\
+                .single()\
+                .execute()
+            profile = profile_response.data or {}
+            user_name = profile.get("display_name") or profile.get("username") or "User"
+        except Exception as e:
+            print(f"Profile lookup skipped for {request.user_id}: {e}")
         
         # Get user email using Supabase Admin API
         user_email = None
@@ -660,6 +691,27 @@ async def send_notification(request: NotificationRequest):
                 user_email = user_response.user.email
         except Exception as e:
             print(f"Could not get user email: {e}")
+
+        if request.recipient_email:
+            user_email = request.recipient_email
+        elif request.recipient_emails and len(request.recipient_emails) == 1:
+            user_email = request.recipient_emails[0]
+
+        route_line = ""
+        if None not in (request.pickup_lat, request.pickup_lon, request.drop_lat, request.drop_lon):
+            route_line = (
+                f"🧭 Route Coordinates: "
+                f"Pickup ({request.pickup_lat:.6f}, {request.pickup_lon:.6f}) → "
+                f"Drop ({request.drop_lat:.6f}, {request.drop_lon:.6f})\n"
+            )
+
+        hospital_line = ""
+        if request.nearby_hospital_name:
+            hospital_line = f"🏥 Nearby Hospital: {request.nearby_hospital_name}\n"
+
+        map_line = ""
+        if request.map_link:
+            map_line = f"🗺️ Live Map Link: {request.map_link}\n"
         
         # Prepare email content
         status_messages = {
@@ -677,6 +729,7 @@ Dear {user_name},
 🚨 Disaster Type: {request.disaster_type}
 👥 Assigned Team: {request.team_name}
 📊 Status: {request.status.replace('-', ' ').title()}
+{route_line}{hospital_line}{map_line}
 
 {"Our rescue team is on the way and will reach you as quickly as possible. Please stay safe and follow any local emergency guidelines." if request.status != "resolved" else ""}
 
@@ -725,6 +778,7 @@ This is an automated notification from RescueConnect.
             "user_email": user_email,
             "email_sent": email_sent,
             "status": request.status,
+            "idempotency_key": request.idempotency_key,
             "message": f"Notification {'sent' if email_sent else 'logged'} for {user_name}"
         }
         

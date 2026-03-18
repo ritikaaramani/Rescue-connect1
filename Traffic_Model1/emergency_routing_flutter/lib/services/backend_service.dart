@@ -11,6 +11,17 @@ class BackendService {
     'http://127.0.0.1:9000',
     'http://192.168.1.1:9000',  // Common router IP
   ];
+
+  static const List<String> possibleMlUrls = [
+    'http://localhost:9003',
+    'http://127.0.0.1:9003',
+    'http://10.0.2.2:9003',
+    'http://192.168.1.1:9003',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://10.0.2.2:8000',
+    'http://192.168.1.1:8000',
+  ];
   
   String baseUrl = 'http://localhost:9000';
   
@@ -267,6 +278,67 @@ class BackendService {
       print('❌ Error fetching vehicles: $e');
       return [];
     }
+  }
+
+  /// Send single-recipient routing-start notification email via ML backend.
+  Future<Map<String, dynamic>> sendRoutingStartNotification({
+    required String postId,
+    required String userId,
+    required String status,
+    required String teamName,
+    required String disasterType,
+    required String location,
+    required double pickupLat,
+    required double pickupLon,
+    required double dropLat,
+    required double dropLon,
+    required String nearbyHospitalName,
+    required String mapLink,
+    required String idempotencyKey,
+    bool singleRecipientOnly = true,
+  }) async {
+    final payload = {
+      'post_id': postId,
+      'user_id': userId,
+      'status': status,
+      'team_name': teamName,
+      'disaster_type': disasterType,
+      'location': location,
+      'pickup_lat': pickupLat,
+      'pickup_lon': pickupLon,
+      'drop_lat': dropLat,
+      'drop_lon': dropLon,
+      'nearby_hospital_name': nearbyHospitalName,
+      'map_link': mapLink,
+      'idempotency_key': idempotencyKey,
+      'single_recipient_only': singleRecipientOnly,
+    };
+
+    final dynamicMlUrls = <String>{
+      ...possibleMlUrls,
+      'http://${Uri.parse(baseUrl).host}:9003',
+      'http://${Uri.parse(baseUrl).host}:8000',
+    }.toList();
+
+    Exception? lastError;
+    for (final base in dynamicMlUrls) {
+      try {
+        final response = await http.post(
+          Uri.parse('$base/send-notification'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(payload),
+        );
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        }
+        lastError = Exception('Notification endpoint failed at $base: ${response.statusCode} ${response.body}');
+      } catch (e) {
+        lastError = Exception('Notification endpoint unreachable at $base: $e');
+      }
+    }
+
+    throw lastError ?? Exception('Unable to send routing-start notification');
   }
 
   /// Get all hospitals
@@ -548,6 +620,7 @@ class BackendService {
            
            return {
              "id": post['id'].toString(),
+             "reporterUserId": post['user_id']?.toString(),
              "type": incidentType,
              "priority": priority,
              "originCoord": {"latitude": lat, "longitude": lon},
