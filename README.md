@@ -3,7 +3,16 @@
 ![Platform](https://img.shields.io/badge/Platform-React_|_Flutter_|_FastAPI_|_SUMO-blue)
 ![AI Models](https://img.shields.io/badge/AI_Models-RL_(DQN)_|_LSTM+GCN_|_XGBoost_|_YOLO+Tesseract_|_Gemini-orange)
 
-**RescueConnect** is a comprehensive, AI-driven emergency response orchestration platform. The system operates autonomously through a 3-Layer pipeline—starting from the moment a citizen posts an incident on social media, all the way to a system-guided ambulance navigating unpredictable city traffic using Deep Reinforcement Learning.
+We have Google Maps, Ola Maps, Rapido and so many navigation tools — **yet we still hear stories of patients not making it in time.**
+
+Because the problem isn’t navigation. **It’s the lack of coordination when every second counts.** 
+
+RescueConnect is an emergency response platform that connects:
+*   The person reporting the incident,
+*   The dispatcher making decisions, and
+*   The vehicle trying to reach on time.
+
+**All in one system.** It leverages a full 3-Layer pipeline—starting from the moment a citizen posts an incident on social media, analyzing it with ML/OCR tools, all the way to a system-guided ambulance navigating unpredictable city traffic using Deep Reinforcement Learning.
 
 ---
 
@@ -25,12 +34,14 @@ Raw citizen reports are useless without context. This layer serves as the "brain
     *   **NLP & Geolocation:** Uses **spaCy NER** to parse the post's caption and OCR results, cross-referencing OS Nominatim APIs to infer highly precise lat/long coordinates.
 *   **Authority Dashboard (`user_app/rescue_connect/authority`):** A React-based command center for dispatchers. It maps validated incidents, displays AI "urgency scores" (1-10), and gives the dispatcher the 1-click power to hit **"DISPATCH NOW"**.
 
-### 🚗 Layer 3: Dynamic Routing & Orchestration (SUMO Pipeline)
-Once the Dispatcher validates the AI's findings in Layer 2 and deploys a vehicle, Layer 3 takes over to actually get the emergency vehicle to the scene.
+### 🚗 Layer 3: Dynamic Routing, Orchestration, & Notifications (SUMO Pipeline)
+Once the Dispatcher validates the AI's findings in Layer 2 and deploys a vehicle, Layer 3 takes over. This is where live routing, active coordination, and immediate notifications merge.
+*   **Rapid Notification Trigger:** Crucially, dispatch immediately triggers backend notifications (e.g., via Resend) to alert drivers, sync up dispatchers, and let the original civilian reporter know that an ambulance has been securely dispatched.
 *   **The Orchestrator:** Powered by FastAPI (`dynamic-rerouting/unified_api.py`) bridging the Flutter app with SUMO (Simulation of Urban MObility). 
-*   **Traffic Forecasting (Model 1):** Spatiotemporal models (LSTM + GCN) predict congestion 5–30 mins out.
-*   **Reliability Scoring (Model 2):** XGBoost evaluates current traffic to score corridor stability.
-*   **Dynamic Rerouter (Model 3 - DQN Agent):** A deep reinforcement learning agent that instantaneously calculates detours in real-time if a simulated blockage, monsoon delay, or accident suddenly blocks the ambulance. Updates stream at 2 Hz via WebSockets directly into the Driver and Citizen Flutter App.
+*   **Traffic Forecasting (Model 1):** Spatiotemporal models (LSTM + GCN) predict congestion 5–30 mins out to proactively determine the clearest starting path.
+*   **Reliability Scoring (Model 2):** XGBoost evaluates current traffic on a fractional scale to determine overall corridor stability.
+*   **Dynamic Rerouter (Model 3 - DQN Agent):** A deep reinforcement learning agent that instantaneously acts as a backup rerouter. If a simulated blockage, monsoon delay, or accident suddenly blocks the ambulance mid-transfer, the DQN agent calculates a real-time detour. 
+*   **Live App Feed:** The unified architecture continually streams position coordinates and newly updated routes at 2 Hz via WebSockets. Both the dispatched Driver and the reporting Citizen remain totally in-sync via their respective React/Flutter interfaces.
 
 ---
 
@@ -51,7 +62,7 @@ Once the Dispatcher validates the AI's findings in Layer 2 and deploys a vehicle
 Run the full pipeline from Citizen Report to Ambulance Rerouting.
 
 ### **Step 1: Start Layer 1 & 2 (Incident Generation & ML)**
-Ensure your `user_app/rescue_connect/ml_backend/.env` has your valid API keys (Supabase, Gemini/Groq).
+Ensure your `user_app/rescue_connect/ml_backend/.env` has your valid API keys (Supabase, Gemini/Groq, Resend API key).
 ```bash
 # Terminal 1: ML Backend
 cd user_app/rescue_connect/ml_backend
@@ -89,7 +100,7 @@ flutter run -d chrome
 
 ### **Step 4: The Live Scenario**
 1. Dispatch an incident from the Authority Dashboard (Layer 2) which talks to Layer 3. 
-2. In the Flutter App, click the map to view the auto-assigned route.
+2. In the Flutter App, click the map to view the auto-assigned route. (And see the Dispatch notifications via email).
 3. **The Rerouting Event:** Within 2-4 minutes, our SUMO `blockage_simulator` automatically hits the route with an obstacle (e.g., simulating a sudden procession). 
 4. The system identifies it within 30 seconds, autonomous route correction initiates (DQN agent), and the vehicle's new route flashes on the Flutter Map instantly (Green line = Traveled, Orange line = Planned, Cyan = Newly Rerouted).
 
@@ -102,4 +113,4 @@ flutter run -d chrome
 *   **Routing Simulator:** SUMO, TraCI Interface, OSRM
 *   **Backends:** FastAPI, Python, WebSockets
 *   **Frontends:** React, Vite (Web User/Authority Apps); Flutter, Dart (Cross-Platform Driver UI)
-*   **Database:** Supabase (PostgreSQL)
+*   **Database & Alerts:** Supabase (PostgreSQL), Resend (Email Notifications)
